@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Env secrets
+.env
+
+# Node
+node_modules/
+
+# Build
+dist/
+
+# Runtime
+.run/

@@ -1,0 +1,26 @@
+[Unit]
+Description=stock_pb_calc Flask API (gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/stock_pb_calc
+
+# Put secrets in this file (do not commit to repo)
+EnvironmentFile=/opt/stock_pb_calc/.env
+
+# Bind to localhost; let nginx handle public traffic
+ExecStart=/opt/stock_pb_calc/.venv/bin/gunicorn \
+  --workers 2 \
+  --threads 4 \
+  --bind 127.0.0.1:8001 \
+  --timeout 180 \
+  wsgi:app
+
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
