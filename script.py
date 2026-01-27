@@ -840,6 +840,16 @@ def create_app(mysql_cfg: Dict[str, Any]):
 
     # -------------------------- wx_sector_stock_pick --------------------------
 
+    def _env_bool(name: str, default: bool = False) -> bool:
+        v = (os.getenv(name) or "").strip().lower()
+        if not v:
+            return default
+        if v in ("1", "true", "yes", "y", "on"):
+            return True
+        if v in ("0", "false", "no", "n", "off"):
+            return False
+        return default
+
     @contextlib.contextmanager
     def _akshare_no_proxy():
         """Disable HTTP(S) proxy env vars for AkShare/EastMoney calls.
@@ -958,8 +968,10 @@ def create_app(mysql_cfg: Dict[str, Any]):
 
         Prefer AkShare, but fallback to EastMoney HTTP when AkShare network path fails.
         """
-        # Try AkShare first.
-        if ak is not None:
+        # Try AkShare first (optional).
+        # Default off: AkShare can occasionally return different field formats/units,
+        # causing the downstream filters (pct/turnover thresholds) to behave inconsistently.
+        if ak is not None and _env_bool("PICKS_USE_AKSHARE", default=False):
             try:
                 df = _get_concept_name_df()
                 # Expect columns: 板块名称, 板块代码
@@ -1141,8 +1153,8 @@ def create_app(mysql_cfg: Dict[str, Any]):
             # We can still use EastMoney HTTP fallback without AkShare.
             pass
 
-        # Try AkShare first.
-        if ak is not None:
+        # Try AkShare first (optional). See `PICKS_USE_AKSHARE` note above.
+        if ak is not None and _env_bool("PICKS_USE_AKSHARE", default=False):
             try:
                 with _akshare_no_proxy():
                     df = ak.stock_board_concept_cons_em(symbol=concept_name)
@@ -1171,29 +1183,53 @@ def create_app(mysql_cfg: Dict[str, Any]):
         code = str(board_code or "").strip()
         if not code:
             return []
-        j = _em_clist_get(
-            fs=f"b:{code}+f:!50",
-            fields="f12,f14,f2,f3,f17,f18,f8,f9,f23",
-            pn=1,
-            pz=500,
-            fid="f3",
-        )
-        diff = (((j or {}).get("data") or {}).get("diff") or [])
+
+        # Some boards can exceed a single page; paginate to keep results stable.
+        try:
+            page_size = int(os.getenv("PICKS_BOARD_PAGE_SIZE", "200"))
+        except Exception:
+            page_size = 200
+        page_size = max(50, min(page_size, 500))
+        try:
+            max_pages = int(os.getenv("PICKS_BOARD_MAX_PAGES", "10"))
+        except Exception:
+            max_pages = 10
+        max_pages = max(1, min(max_pages, 50))
+
         out: List[Dict[str, Any]] = []
-        for it in diff:
-            out.append(
-                {
-                    "代码": it.get("f12"),
-                    "名称": it.get("f14"),
-                    "最新价": it.get("f2"),
-                    "涨跌幅": it.get("f3"),
-                    "今开": it.get("f17"),
-                    "昨收": it.get("f18"),
-                    "换手率": it.get("f8"),
-                    "市盈率-动态": it.get("f9"),
-                    "市净率": it.get("f23"),
-                }
+        seen_codes: set[str] = set()
+        for pn in range(1, max_pages + 1):
+            j = _em_clist_get(
+                fs=f"b:{code}+f:!50",
+                fields="f12,f14,f2,f3,f17,f18,f8,f9,f23",
+                pn=pn,
+                pz=page_size,
+                fid="f3",
             )
+            diff = (((j or {}).get("data") or {}).get("diff") or [])
+            if not diff:
+                break
+            for it in diff:
+                c0 = str(it.get("f12") or "").strip()
+                if not c0 or c0 in seen_codes:
+                    continue
+                seen_codes.add(c0)
+                out.append(
+                    {
+                        "代码": c0,
+                        "名称": it.get("f14"),
+                        "最新价": it.get("f2"),
+                        "涨跌幅": it.get("f3"),
+                        "今开": it.get("f17"),
+                        "昨收": it.get("f18"),
+                        "换手率": it.get("f8"),
+                        "市盈率-动态": it.get("f9"),
+                        "市净率": it.get("f23"),
+                    }
+                )
+            if len(diff) < page_size:
+                break
+
         return out
 
     @app.get("/api/picks")
