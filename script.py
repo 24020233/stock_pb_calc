@@ -506,6 +506,24 @@ def create_app(mysql_cfg: Dict[str, Any]):
         except Exception:
             return None
 
+    def _maybe_ratio_to_percent(v: Any) -> Optional[float]:
+        """Normalize values that may be provided as ratio (0.xx) or percent (x.xx).
+
+        Some upstream sources (or transient failures) can yield ratio values like 0.0985
+        where the UI/filters expect 9.85.
+
+        Heuristic:
+        - If numeric and 0 < |v| < 0.3, treat as ratio and multiply by 100.
+        - Otherwise treat as already-percent.
+        """
+
+        f = _to_float(v)
+        if f is None:
+            return None
+        if 0 < abs(f) < 0.3:
+            return f * 100.0
+        return f
+
     def list_today_seeds(conn: MySQLConnection, ymd: str) -> List[Dict[str, Any]]:
         # Best-effort date filter: `post_time_str` usually like 'YYYY-MM-DD ...'
         # Also filter non-deleted.
@@ -1328,6 +1346,7 @@ def create_app(mysql_cfg: Dict[str, Any]):
 
         picks: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
+        sector_stats: List[Dict[str, Any]] = []
         matched_sectors = 0
 
         for srow in sectors:
@@ -1385,17 +1404,34 @@ def create_app(mysql_cfg: Dict[str, Any]):
                 continue
 
             matched_sectors += 1
+
+            fetched = len(cons or [])
+            missing_pct = 0
+            missing_turn = 0
+            below_pct = 0
+            below_turn = 0
+            picked = 0
+
             for r in cons:
                 code = str(r.get("代码") or "").strip()
                 name = str(r.get("名称") or "").strip()
                 if not code or not name:
                     continue
 
-                pct = _to_float(r.get("涨跌幅"))
-                turn = _to_float(r.get("换手率"))
-                if pct is None or turn is None:
+                pct = _maybe_ratio_to_percent(r.get("涨跌幅"))
+                turn = _maybe_ratio_to_percent(r.get("换手率"))
+                if pct is None:
+                    missing_pct += 1
                     continue
-                if pct < float(min_change) or turn < float(min_turnover):
+                if turn is None:
+                    missing_turn += 1
+                    continue
+
+                if pct < float(min_change):
+                    below_pct += 1
+                    continue
+                if turn < float(min_turnover):
+                    below_turn += 1
                     continue
 
                 picks.append(
@@ -1413,6 +1449,23 @@ def create_app(mysql_cfg: Dict[str, Any]):
                         "pb": _to_float(r.get("市净率")),
                     }
                 )
+                picked += 1
+
+            sector_stats.append(
+                {
+                    "sector": sector_name,
+                    "mention_count": int(srow.get("mention_count") or 0),
+                    "board_kind": board_kind,
+                    "matched": matched_name,
+                    "board_code": board_code,
+                    "fetched": fetched,
+                    "picked": picked,
+                    "missing_pct": missing_pct,
+                    "missing_turnover": missing_turn,
+                    "below_pct": below_pct,
+                    "below_turnover": below_turn,
+                }
+            )
 
         # Persist (replace day set).
         try:
@@ -1463,6 +1516,7 @@ def create_app(mysql_cfg: Dict[str, Any]):
                 "sectors_total": len(sectors),
                 "sectors_matched": matched_sectors,
                 "skipped": skipped,
+                "sector_stats": sector_stats,
                 "rows": picks,
                 "params": {"minMention": min_mention, "minChange": min_change, "minTurnover": min_turnover, "maxSectors": max_sectors},
                 "boards": {"concept": len(concept_names), "industry": len(industry_names)},
