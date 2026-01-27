@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { generateSectors, listSectors, type SectorRow } from '../api/sectors'
 
 function ymdToday(): string {
@@ -50,6 +50,42 @@ async function onGenerate() {
   }
 }
 
+async function onRegenerate() {
+  if (generating.value) return
+
+  try {
+    await ElMessageBox.confirm(
+      `将清空 ${form.date} 的板块总结并重新生成，可能需要一些时间。继续？`,
+      '重新生成确认',
+      {
+        type: 'warning',
+        confirmButtonText: '清空并重新生成',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch (e) {
+    // cancelled
+    return
+  }
+
+  generating.value = true
+  // UI 先清空当前日期展示
+  rows.value = []
+  try {
+    const resp = await generateSectors({ date: form.date, force: 1 })
+    if (!resp.success) throw new Error(String(resp.error))
+    rows.value = resp.data?.rows || []
+    ElMessage.success(`已重新生成：${resp.data?.generated || 0} 个板块；抓取失败：${resp.data?.fetch_failures || 0} 篇`)
+  } catch (e: any) {
+    const serverMsg = e?.response?.data?.error || e?.response?.data?.message
+    ElMessage.error(serverMsg || e?.message || String(e))
+    // Best-effort: pull whatever is currently stored.
+    await fetchList()
+  } finally {
+    generating.value = false
+  }
+ }
+
 onMounted(fetchList)
 </script>
 
@@ -70,6 +106,7 @@ onMounted(fetchList)
         <el-form-item>
           <el-button :loading="loading" @click="fetchList">刷新</el-button>
           <el-button type="primary" :loading="generating" @click="onGenerate">生成板块</el-button>
+          <el-button type="danger" :loading="generating" @click="onRegenerate">重新生成</el-button>
         </el-form-item>
       </el-form>
 

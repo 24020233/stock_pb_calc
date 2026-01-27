@@ -19,7 +19,7 @@ export async function listSectors(params?: { date?: string }) {
   return resp.data
 }
 
-export async function generateSectors(body?: { date?: string }) {
+export async function generateSectors(body?: { date?: string; force?: 0 | 1 }) {
   const resp = await http.post<ApiResp<{ date: string; generated: number; fetch_failures: number; rows: SectorRow[] }>>(
     '/api/sectors/generate',
     body || {},
