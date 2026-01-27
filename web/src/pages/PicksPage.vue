@@ -30,7 +30,7 @@ const paging = reactive({
 const form = reactive({
   date: ymdToday(),
   sector: '',
-  minMention: 4,
+  minMention: 3,
   minChange: 5,
   minTurnover: 5,
   maxSectors: 30,
