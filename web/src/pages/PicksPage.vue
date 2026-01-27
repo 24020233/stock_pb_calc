@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { generatePicks, listPicks, type PickRow } from '../api/picks'
 
 function ymdToday(): string {
@@ -128,6 +128,51 @@ async function onGenerate() {
   }
 }
 
+async function onRegenerate() {
+  if (generating.value) return
+
+  try {
+    await ElMessageBox.confirm(
+      `将清空 ${form.date} 的板块选股并重新生成，可能需要一些时间。继续？`,
+      '重新生成确认',
+      {
+        type: 'warning',
+        confirmButtonText: '清空并重新生成',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch (e) {
+    // cancelled
+    return
+  }
+
+  generating.value = true
+  // UI 先清空当前日期展示
+  rows.value = []
+  try {
+    // 后端会按 day 先 DELETE 再 INSERT（等价于“清空并重建”）
+    const resp = await generatePicks({
+      date: form.date,
+      minMention: form.minMention,
+      minChange: form.minChange,
+      minTurnover: form.minTurnover,
+      maxSectors: form.maxSectors,
+    })
+    if (!resp.success) throw new Error(String(resp.error))
+    rows.value = resp.data?.rows || []
+    ElMessage.success(
+      `已重新生成：${resp.data?.generated || 0} 条；板块匹配：${resp.data?.sectors_matched || 0}/${resp.data?.sectors_total || 0}`,
+    )
+  } catch (e: any) {
+    const serverMsg = e?.response?.data?.error || e?.response?.data?.message
+    ElMessage.error(serverMsg || e?.message || String(e))
+    // Best-effort: pull whatever is currently stored.
+    await fetchList()
+  } finally {
+    generating.value = false
+  }
+ }
+
 function onSearch() {
   paging.offset = 0
   fetchList()
@@ -184,6 +229,7 @@ onMounted(fetchList)
         <el-form-item>
           <el-button :loading="loading" @click="fetchList">刷新</el-button>
           <el-button type="primary" :loading="generating" @click="onGenerate">生成选股</el-button>
+          <el-button type="danger" :loading="generating" @click="onRegenerate">重新生成</el-button>
           <el-button :disabled="!rows.length" @click="onExportExcel">导出Excel</el-button>
         </el-form-item>
       </el-form>
