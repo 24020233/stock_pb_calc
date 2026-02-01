@@ -26,3 +26,19 @@ export async function generateSectors(body?: { date?: string; force?: 0 | 1 }) {
   )
   return resp.data
 }
+
+export type SectorDateRow = {
+  day: string
+  sector_count: number
+  sectors: string[]
+}
+
+export async function listSectorDates() {
+  const resp = await http.get<ApiResp<{ rows: SectorDateRow[] }>>('/api/sectors/dates')
+  return resp.data
+}
+
+export async function deleteSectors(date: string) {
+  const resp = await http.delete<ApiResp<{ date: string; deleted: number }>>('/api/sectors', { params: { date } })
+  return resp.data
+}

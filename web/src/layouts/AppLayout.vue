@@ -11,7 +11,9 @@ const title = computed(() => {
   if (route.path.startsWith('/accounts')) return '公众号管理'
   if (route.path.startsWith('/articles')) return '文章管理'
   if (route.path.startsWith('/sectors')) return '板块总结'
+  if (route.path.startsWith('/picks-history')) return '历史选股'
   if (route.path.startsWith('/picks')) return '板块选股'
+  if (route.path.startsWith('/settings')) return '系统设置'
   return '后台'
 })
 
@@ -39,10 +41,17 @@ function onLogout() {
     <el-container class="app-body">
       <el-aside class="app-aside" width="200px">
         <el-menu class="app-menu" router :default-active="route.path">
-          <el-menu-item index="/accounts">公众号管理</el-menu-item>
           <el-menu-item index="/articles">文章管理</el-menu-item>
           <el-menu-item index="/sectors">板块总结</el-menu-item>
+          <el-menu-item index="/picks-history">历史选股</el-menu-item>
           <el-menu-item index="/picks">板块选股</el-menu-item>
+          <el-sub-menu index="settings">
+            <template #title>系统设置</template>
+            <el-menu-item index="/accounts">公众号管理</el-menu-item>
+            <el-menu-item index="/settings/movement">异动规则</el-menu-item>
+            <el-menu-item index="/settings/fundamental">基本面判断点</el-menu-item>
+            <el-menu-item index="/settings/technical">技术面判断点</el-menu-item>
+          </el-sub-menu>
         </el-menu>
       </el-aside>
 

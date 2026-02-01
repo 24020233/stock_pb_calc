@@ -856,6 +856,67 @@ def create_app(mysql_cfg: Dict[str, Any]):
 
         return ok({"date": ymd, "generated": len(out_rows), "fetch_failures": failures, "rows": out_rows, "cached": False, "max_articles": max_articles, "industry_candidates": len(industry_names)})
 
+    @app.get("/api/sectors/dates")
+    def list_sector_dates_api():
+        """获取所有有板块总结的日期列表及其行业数量"""
+        try:
+            conn = get_db()
+        except Exception as e:
+            return err(f"db-connect-error:{e}", status=500)
+        try:
+            ensure_sector_tables(conn)
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                "SELECT day, COUNT(*) as sector_count, GROUP_CONCAT(sector ORDER BY mention_count DESC SEPARATOR ',') as sectors "
+                "FROM wx_sector_daily GROUP BY day ORDER BY day DESC"
+            )
+            rows = list(cur.fetchall() or [])
+            cur.close()
+
+            # 将sectors字符串转换为数组并只取前3个，日期转换为字符串格式
+            result = []
+            for r in rows:
+                sectors_list = (r.get("sectors") or "").split(",") if r.get("sectors") else []
+                sectors_list = [s for s in sectors_list if s][:3]  # 取前3个
+                # 将日期转换为字符串格式 YYYY-MM-DD
+                day_value = r.get("day")
+                if day_value:
+                    # 使用isoformat()转换为YYYY-MM-DD格式
+                    day_str = day_value.strftime("%Y-%m-%d") if hasattr(day_value, "strftime") else str(day_value)
+                else:
+                    day_str = ""
+                result.append({
+                    "day": day_str,
+                    "sector_count": r.get("sector_count"),
+                    "sectors": sectors_list
+                })
+
+            return ok({"rows": result})
+        finally:
+            conn.close()
+
+    @app.delete("/api/sectors")
+    def delete_sectors_api():
+        """删除指定日期的板块总结"""
+        ymd = _parse_ymd(request.args.get("date") or "")
+        if not ymd:
+            return err("Missing or invalid date parameter (YYYY-MM-DD)", status=400)
+
+        try:
+            conn = get_db()
+        except Exception as e:
+            return err(f"db-connect-error:{e}", status=500)
+        try:
+            ensure_sector_tables(conn)
+            cur = conn.cursor()
+            cur.execute("DELETE FROM wx_sector_daily WHERE day=%s", (ymd,))
+            deleted = cur.rowcount
+            conn.commit()
+            cur.close()
+            return ok({"date": ymd, "deleted": deleted})
+        finally:
+            conn.close()
+
     # -------------------------- wx_sector_stock_pick --------------------------
 
     def _env_bool(name: str, default: bool = False) -> bool:

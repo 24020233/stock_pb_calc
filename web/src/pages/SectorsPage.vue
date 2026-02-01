@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { generateSectors, listSectors, type SectorRow } from '../api/sectors'
 
@@ -11,6 +12,7 @@ function ymdToday(): string {
   return `${y}-${m}-${dd}`
 }
 
+const route = useRoute()
 const loading = ref(false)
 const generating = ref(false)
 const rows = ref<SectorRow[]>([])
@@ -20,6 +22,16 @@ const form = reactive({
 })
 
 const totalMentions = computed(() => rows.value.reduce((acc, r) => acc + Number(r.mention_count || 0), 0))
+
+// 初始化日期：优先使用URL参数，否则使用今天
+function initDateFromQuery() {
+  const dateFromQuery = route.query.date as string
+  if (dateFromQuery && /^\d{4}-\d{2}-\d{2}$/.test(dateFromQuery)) {
+    form.date = dateFromQuery
+  } else {
+    form.date = ymdToday()
+  }
+}
 
 async function fetchList() {
   loading.value = true
@@ -86,7 +98,22 @@ async function onRegenerate() {
   }
  }
 
-onMounted(fetchList)
+// 初始化：先从URL获取日期，再加载数据
+onMounted(() => {
+  initDateFromQuery()
+  fetchList()
+})
+
+// 监听路由变化，当日期参数改变时重新加载
+watch(
+  () => route.query.date,
+  (newDate) => {
+    if (newDate && /^\d{4}-\d{2}-\d{2}$/.test(newDate as string)) {
+      form.date = newDate as string
+      fetchList()
+    }
+  },
+)
 </script>
 
 <template>
