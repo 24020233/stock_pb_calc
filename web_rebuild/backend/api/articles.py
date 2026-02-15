@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from database import get_db
 from services.crawler import (
     DajialaAPIError,
-    fetch_article_html,
+    fetch_article_detail,
     fetch_article_list_by_name,
     parse_article_detail,
     parse_article_list,
@@ -58,11 +58,12 @@ class ArticleDetailItem(BaseModel):
 
     id: int
     title: str
-    article_url: str
-    post_time: Optional[int]
-    wxid: Optional[str]
+    url: str
+    pubtime: Optional[int]
+    hashid: Optional[str]
+    nick_name: Optional[str]
     author: Optional[str]
-    html: Optional[str]
+    content: Optional[str]
 
 
 class ApiResponse(BaseModel):
@@ -168,12 +169,12 @@ async def upsert_article_detail(
     detail: Dict[str, Any],
 ) -> int:
     """Insert or update article detail, return detail ID."""
-    url = detail["article_url"]
+    url = detail["url"]
 
     async with conn.cursor() as cur:
         # Check if detail exists by URL hash
         await cur.execute(
-            "SELECT id FROM wx_article_detail WHERE MD5(article_url) = MD5(%s) LIMIT 1",
+            "SELECT id FROM wx_article_detail WHERE MD5(url) = MD5(%s) LIMIT 1",
             (url,),
         )
         row = await cur.fetchone()
@@ -182,15 +183,16 @@ async def upsert_article_detail(
             await cur.execute(
                 """
                 UPDATE wx_article_detail
-                SET title = %s, post_time = %s, wxid = %s, author = %s, html = %s, fetched_at = NOW()
+                SET title = %s, pubtime = %s, hashid = %s, nick_name = %s, author = %s, content = %s, fetched_at = NOW()
                 WHERE id = %s
                 """,
                 (
                     detail["title"],
-                    detail["post_time"],
-                    detail["wxid"],
+                    detail["pubtime"],
+                    detail["hashid"],
+                    detail["nick_name"],
                     detail["author"],
-                    detail["html"],
+                    detail["content"],
                     row[0],
                 ),
             )
@@ -199,17 +201,18 @@ async def upsert_article_detail(
         # Insert new record
         await cur.execute(
             """
-            INSERT INTO wx_article_detail (article_list_id, title, article_url, post_time, wxid, author, html)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO wx_article_detail (article_list_id, title, url, pubtime, hashid, nick_name, author, content)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 article_list_id,
                 detail["title"],
                 url,
-                detail["post_time"],
-                detail["wxid"],
+                detail["pubtime"],
+                detail["hashid"],
+                detail["nick_name"],
                 detail["author"],
-                detail["html"],
+                detail["content"],
             ),
         )
         return cur.lastrowid
@@ -307,16 +310,16 @@ async def fetch_detail(
     conn: Connection = Depends(get_db),
 ) -> ApiResponse:
     """
-    Fetch article HTML content by URL.
+    Fetch article detail by URL.
 
     This endpoint:
-    1. Calls Dajiala API to get article HTML
-    2. Saves title, article_url, post_time, wxid, author, html to database
+    1. Calls Dajiala API to get article detail
+    2. Saves title, url, pubtime, hashid, nick_name, author, content to database
     3. Returns the article detail
     """
     try:
         # Fetch from Dajiala API
-        api_response = await fetch_article_html(request.url)
+        api_response = await fetch_article_detail(request.url)
 
         # Parse detail
         detail = parse_article_detail(api_response)
@@ -333,11 +336,12 @@ async def fetch_detail(
             data={
                 "id": detail_id,
                 "title": detail["title"],
-                "article_url": detail["article_url"],
-                "post_time": detail.get("post_time"),
-                "wxid": detail.get("wxid"),
+                "url": detail["url"],
+                "pubtime": detail.get("pubtime"),
+                "hashid": detail.get("hashid"),
+                "nick_name": detail.get("nick_name"),
                 "author": detail.get("author"),
-                "html": detail.get("html"),
+                "content": detail.get("content"),
             },
         )
 

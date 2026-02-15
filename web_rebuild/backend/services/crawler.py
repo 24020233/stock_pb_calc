@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Dajiala API endpoints
 DAJIALA_POST_CONDITION_URL = "https://www.dajiala.com/fbmain/monitor/v3/post_condition"
-DAJIALA_ARTICLE_HTML_URL = "https://www.dajiala.com/fbmain/monitor/v3/article_html"
+DAJIALA_ARTICLE_DETAIL_URL = "https://www.dajiala.com/fbmain/monitor/v3/article_detail"
 
 
 class DajialaAPIError(Exception):
@@ -69,15 +69,15 @@ async def fetch_article_list_by_name(name: str) -> Dict[str, Any]:
     return data
 
 
-async def fetch_article_html(url: str) -> Dict[str, Any]:
+async def fetch_article_detail(url: str) -> Dict[str, Any]:
     """
-    Fetch article HTML content by URL.
+    Fetch article detail by URL.
 
     Args:
         url: WeChat article URL
 
     Returns:
-        API response containing article HTML and metadata
+        API response containing article detail and metadata
 
     Raises:
         DajialaAPIError: If API returns an error
@@ -85,21 +85,21 @@ async def fetch_article_html(url: str) -> Dict[str, Any]:
     """
     settings = get_settings()
 
-    payload = {
+    params = {
         "url": url,
         "key": settings.dajiala_key,
         "verifycode": settings.dajiala_verifycode or "",
+        "mode": "2",  # 2: 纯文字+富文本格式
     }
 
     headers = {
-        "Content-Type": "application/json",
         "Accept": "application/json",
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            DAJIALA_ARTICLE_HTML_URL,
-            json=payload,
+        response = await client.get(
+            DAJIALA_ARTICLE_DETAIL_URL,
+            params=params,
             headers=headers,
         )
         response.raise_for_status()
@@ -159,20 +159,29 @@ def parse_article_detail(api_response: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Parsed article detail record
     """
-    data = api_response.get("data", {})
+    data = api_response
 
     return {
         "title": data.get("title", ""),
-        "article_url": data.get("article_url", ""),
-        "post_time": data.get("post_time"),
-        "wxid": data.get("wxid", ""),
+        "url": data.get("url", ""),
+        "pubtime": data.get("pubtime"),
+        "hashid": data.get("hashid", ""),
+        "nick_name": data.get("nick_name", ""),
         "author": data.get("author", ""),
-        "html": data.get("html", ""),
+        "content": data.get("content_multi_text", data.get("content", "")),
         "mp_head_img": data.get("mp_head_img"),
-        "cover_url": data.get("cover_url"),
-        "nickname": data.get("nickname"),
-        "gh_id": data.get("gh_id"),
+        "picture_page_info_list": data.get("picture_page_info_list"),
+        "cdn_url_1_1": data.get("cdn_url_1_1"),
+        "user_name": data.get("user_name"),
+        "idx": data.get("idx"),
+        "msg_daily_idx": data.get("msg_daily_idx"),
+        "create_time": data.get("create_time"),
+        "biz": data.get("biz"),
+        "alias": data.get("alias"),
+        "source_url": data.get("source_url"),
         "signature": data.get("signature"),
-        "copyright": data.get("copyright"),
+        "desc": data.get("desc"),
+        "copyright_stat": data.get("copyright_stat"),
         "ip_wording": data.get("ip_wording"),
+        "item_show_type": data.get("item_show_type"),
     }
