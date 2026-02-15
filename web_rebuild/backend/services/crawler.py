@@ -149,6 +149,40 @@ def parse_article_list(api_response: Dict[str, Any], mp_name_fallback: str = "")
     return records
 
 
+def _parse_pubtime(value: Any) -> Optional[int]:
+    """Convert pubtime to integer timestamp.
+
+    The API may return pubtime as an int timestamp or a date string
+    like '2024-07-31 16:56:19'. The DB column is BIGINT, so we must
+    ensure we always store an integer.
+    """
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (float,)):
+        return int(value)
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        # Try parsing as integer string first
+        try:
+            return int(value)
+        except ValueError:
+            pass
+        # Try parsing as datetime string
+        from datetime import datetime, timezone
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(value, fmt)
+                return int(dt.timestamp())
+            except ValueError:
+                continue
+        logger.warning("Cannot parse pubtime value: %r", value)
+    return None
+
+
 def parse_article_detail(api_response: Dict[str, Any]) -> Dict[str, Any]:
     """
     Parse article detail from API response.
@@ -164,11 +198,11 @@ def parse_article_detail(api_response: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "title": data.get("title", ""),
         "url": data.get("url", ""),
-        "pubtime": data.get("pubtime"),
+        "pubtime": _parse_pubtime(data.get("pubtime")),
         "hashid": data.get("hashid", ""),
         "nick_name": data.get("nick_name", ""),
         "author": data.get("author", ""),
-        "content": data.get("content_multi_text", data.get("content", "")),
+        "content": data.get("content", ""),
         "mp_head_img": data.get("mp_head_img"),
         "picture_page_info_list": data.get("picture_page_info_list"),
         "cdn_url_1_1": data.get("cdn_url_1_1"),

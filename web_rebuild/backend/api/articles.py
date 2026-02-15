@@ -174,7 +174,7 @@ async def upsert_article_detail(
     async with conn.cursor() as cur:
         # Check if detail exists by URL hash
         await cur.execute(
-            "SELECT id FROM wx_article_detail WHERE MD5(url) = MD5(%s) LIMIT 1",
+            "SELECT id FROM wx_article_detail WHERE url_hash = UNHEX(MD5(%s)) LIMIT 1",
             (url,),
         )
         row = await cur.fetchone()
