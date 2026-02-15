@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8002
 
+    # DeepSeek API configuration
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+
     @property
     def mysql_dsn(self) -> str:
         """Return MySQL connection string for aiomysql."""

@@ -18,6 +18,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.articles import router as articles_router
+from api.reports import router as reports_router
+from api.pipeline import router as pipeline_router
+from api.settings import router as settings_router
+from api.stocks import router as stocks_router
 from config import get_settings
 from database import Database
 
@@ -46,9 +50,9 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="WeChat MP Crawler API",
-    description="API for crawling WeChat MP articles using Dajiala API",
-    version="1.0.0",
+    title="蓝胖子自动选股系统 API",
+    description="蓝胖子自动选股系统 - WeChat MP Crawler + Stock Picker",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -64,6 +68,10 @@ app.add_middleware(
 
 # Include routers
 app.include_router(articles_router)
+app.include_router(reports_router)
+app.include_router(pipeline_router)
+app.include_router(settings_router)
+app.include_router(stocks_router)
 
 
 # Health check endpoint
