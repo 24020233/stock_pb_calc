@@ -49,9 +49,12 @@ export default function ReportDetail() {
       if (res.data.code === 0) {
         message.success('开始生成报告...');
         setTimeout(() => loadReportData(parseInt(id)), 2000);
+      } else {
+        message.error(res.data.msg || '生成报告失败');
       }
-    } catch (error) {
-      message.error('生成报告失败');
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.detail || error?.message || '生成报告失败';
+      message.error(errorMsg);
     } finally {
       setLoading(false);
     }

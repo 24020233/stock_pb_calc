@@ -9,6 +9,7 @@ from aiomysql import Connection
 
 import services.llm_service as llm_service
 import services.stock_service as stock_service
+import services.crawler as crawler
 from rules.registry import get_rule_class
 
 logger = logging.getLogger(__name__)
@@ -463,6 +464,102 @@ async def run_full_pipeline(conn: Connection, report_date: str) -> Dict[str, Any
     try:
         # Step 1: Check articles (should already exist from crawler)
         articles = await get_report_articles(conn, report_id)
+
+        # If no articles, try to crawl from enabled target accounts
+        if not articles:
+            logger.info(f"No articles in raw_articles for report {report_id}, crawling from target accounts...")
+
+            # Get enabled target accounts
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT account_name, wx_id FROM target_accounts WHERE status = 'active' ORDER BY sort_order"
+                )
+                account_rows = await cur.fetchall()
+
+            if not account_rows:
+                logger.warning(f"No active target accounts configured")
+            else:
+                # Crawl articles from each account
+                for account_name, wx_id in account_rows:
+                    try:
+                        logger.info(f"Crawling articles from {account_name}...")
+
+                        # Fetch article list
+                        api_response = await crawler.fetch_article_list_by_name(account_name)
+                        article_list_data = crawler.parse_article_list(api_response, mp_name_fallback=account_name)
+
+                        # Fetch article details
+                        for article in article_list_data[:5]:  # Limit to 5 latest articles
+                            try:
+                                url = article.get("url")
+                                if url:
+                                    detail_response = await crawler.fetch_article_detail(url)
+                                    detail = crawler.parse_article_detail(detail_response)
+
+                                    # Check if article already exists in wx_article_detail
+                                    async with conn.cursor() as cur2:
+                                        await cur2.execute(
+                                            "SELECT id FROM wx_article_detail WHERE url_hash = UNHEX(MD5(%s)) LIMIT 1",
+                                            (url,),
+                                        )
+                                        existing = await cur2.fetchone()
+
+                                    if not existing:
+                                        # Insert into wx_article_detail
+                                        async with conn.cursor() as cur2:
+                                            await cur2.execute(
+                                                """INSERT INTO wx_article_detail (article_list_id, title, url, pubtime, hashid, nick_name, author, content)
+                                                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                                                (
+                                                    None,  # article_list_id
+                                                    detail.get("title", ""),
+                                                    detail.get("url", ""),
+                                                    crawler._parse_pubtime(detail.get("pubtime")),
+                                                    detail.get("hashid", ""),
+                                                    detail.get("nick_name", ""),
+                                                    detail.get("author", ""),
+                                                    detail.get("content", ""),
+                                                ),
+                                            )
+                                        logger.info(f"Fetched article: {detail.get('title', '')[:50]}")
+
+                            except Exception as e:
+                                logger.error(f"Failed to fetch article detail for {account_name}: {e}")
+
+                    except Exception as e:
+                        logger.error(f"Failed to crawl articles from {account_name}: {e}")
+
+                # Now sync articles from wx_article_detail to raw_articles
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """SELECT id, title, url, pubtime, nick_name, content
+                           FROM wx_article_detail
+                           WHERE DATE(FROM_UNIXTIME(pubtime)) = %s""",
+                        (report_date,),
+                    )
+                    rows = await cur.fetchall()
+
+                    if rows:
+                        # Insert into raw_articles
+                        for row in rows:
+                            await cur.execute(
+                                """INSERT INTO raw_articles (report_id, title, content, source_account, publish_time, url, article_detail_id)
+                                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                                (
+                                    report_id,
+                                    row[1],  # title
+                                    row[4],  # content
+                                    row[3],  # source_account (nick_name)
+                                    row[2],  # publish_time (pubtime)
+                                    row[1],  # url
+                                    row[0],  # article_detail_id
+                                ),
+                            )
+                        logger.info(f"Synced {len(rows)} articles from wx_article_detail to raw_articles")
+
+                    # Reload articles
+                    articles = await get_report_articles(conn, report_id)
+
         result["steps"]["step1"] = {
             "name": "情报源",
             "completed": True,
