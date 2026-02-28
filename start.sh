@@ -31,7 +31,7 @@ if lsof -i :8002 -t &>/dev/null; then
 else
     cd "$BACKEND_DIR"
     # 在 macOS 上使用 osascript 在新终端窗口启动
-    osascript -e "tell application \"Terminal\" to do script \"cd '$BACKEND_DIR' && python main.py\""
+    osascript -e "tell application \"Terminal\" to do script \"cd '$BACKEND_DIR' && python3 main.py\""
     echo -e "${GREEN}后端服务启动成功 (http://localhost:8002)${NC}"
     echo -e "${GREEN}API 文档: http://localhost:8002/docs${NC}"
 fi
