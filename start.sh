@@ -5,6 +5,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/web_rebuild/backend"
 FRONTEND_DIR="$SCRIPT_DIR/web_rebuild/frontend"
+VENV_DIR="$SCRIPT_DIR/venv"
 
 # 颜色定义
 GREEN='\033[0;32m'
@@ -30,8 +31,8 @@ if lsof -i :8002 -t &>/dev/null; then
     echo -e "${YELLOW}后端服务已在运行 (端口 8002)${NC}"
 else
     cd "$BACKEND_DIR"
-    # 在 macOS 上使用 osascript 在新终端窗口启动
-    osascript -e "tell application \"Terminal\" to do script \"cd '$BACKEND_DIR' && python3 main.py\""
+    # 在 macOS 上使用 osascript 在新终端窗口启动，使用虚拟环境
+    osascript -e "tell application \"Terminal\" to do script \"source '$VENV_DIR/bin/activate' && cd '$BACKEND_DIR' && python main.py\""
     echo -e "${GREEN}后端服务启动成功 (http://localhost:8002)${NC}"
     echo -e "${GREEN}API 文档: http://localhost:8002/docs${NC}"
 fi
