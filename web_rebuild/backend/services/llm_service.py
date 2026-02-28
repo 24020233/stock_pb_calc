@@ -43,15 +43,15 @@ TOPIC_EXTRACTION_PROMPT = """你是一个专业的A股题材挖掘分析师。�
 3. 尝试匹配东方财富网的板块名称（如"人工智能"、"新能源汽车"、"低空经济"、"机器人"、"半导体"等）
 
 请以JSON格式返回，格式如下：
-{
+{{
   "topics": [
-    {
+    {{
       "topic_name": "板块名称",
       "related_boards": ["东财板块名1", "东财板块名2"],
       "logic_summary": "逻辑摘要，简短说明为什么这个题材是热点"
-    }
+    }}
   ]
-}
+}}
 
 文章内容：
 {content}
@@ -69,17 +69,17 @@ STOCK_ANALYSIS_PROMPT = """你是一个专业的A股选股分析师。请分析�
 3. 重点关注在同板块中具有差异化优势的公司
 
 请以JSON格式返回，格式如下：
-{
+{{
   "analysis": [
-    {
+    {{
       "stock_code": "股票代码",
       "stock_name": "股票名称",
       "unique_points": ["独特点1", "独特点2"],
       "scarcity_reason": "稀缺性分析，说明为什么这家公司具有稀缺价值",
-      "reason_score": 0.8  // 稀缺性评分 0-1
-    }
+      "reason_score": 0.8
+    }}
   ]
-}
+}}
 """
 
 
