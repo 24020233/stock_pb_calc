@@ -11,6 +11,7 @@ import services.llm_service as llm_service
 import services.stock_service as stock_service
 import services.crawler as crawler
 from rules.registry import get_rule_class
+from database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -434,47 +435,54 @@ async def step4_apply_rules(conn: Connection, report_id: int, rules_config: List
     return selected_count
 
 
-async def run_full_pipeline(conn: Connection, report_date: str) -> Dict[str, Any]:
+async def run_full_pipeline(report_date: str) -> Dict[str, Any]:
     """Run the full stock selection pipeline.
 
+    This function manages its own database connections from the pool to handle
+    long-running operations (like HTTP requests for crawling) without connection timeout issues.
+
     Args:
-        conn: Database connection
         report_date: Date string in YYYY-MM-DD format
 
     Returns:
         Pipeline execution result
     """
-    # Get or create report
-    report = await get_report_by_date(conn, report_date)
-    if report is None:
-        report_id = await create_report(conn, report_date)
-    else:
-        report_id = report["id"]
-
-    # Update status to processing
-    await update_report_status(conn, report_id, "processing")
-
     result = {
-        "report_id": report_id,
+        "report_id": None,
         "report_date": report_date,
         "status": "processing",
         "steps": {},
     }
 
+    # Step 1: Get or create report
+    async with Database.get_connection() as conn:
+        report = await get_report_by_date(conn, report_date)
+        if report is None:
+            report_id = await create_report(conn, report_date)
+        else:
+            report_id = report["id"]
+
+        # Update status to processing
+        await update_report_status(conn, report_id, "processing")
+
+    result["report_id"] = report_id
+
     try:
         # Step 1: Check articles (should already exist from crawler)
-        articles = await get_report_articles(conn, report_id)
+        async with Database.get_connection() as conn:
+            articles = await get_report_articles(conn, report_id)
 
         # If no articles, try to crawl from enabled target accounts
         if not articles:
             logger.info(f"No articles in raw_articles for report {report_id}, crawling from target accounts...")
 
             # Get enabled target accounts
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT account_name, wx_id FROM target_accounts WHERE status = 'active' ORDER BY sort_order"
-                )
-                account_rows = await cur.fetchall()
+            async with Database.get_connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT account_name, wx_id FROM target_accounts WHERE status = 'active' ORDER BY sort_order"
+                    )
+                    account_rows = await cur.fetchall()
 
             if not account_rows:
                 logger.warning(f"No active target accounts configured")
@@ -496,66 +504,81 @@ async def run_full_pipeline(conn: Connection, report_date: str) -> Dict[str, Any
                                     detail_response = await crawler.fetch_article_detail(url)
                                     detail = crawler.parse_article_detail(detail_response)
 
-                                    # Check if article already exists in wx_article_detail
-                                    async with conn.cursor() as cur2:
-                                        await cur2.execute(
-                                            "SELECT id FROM wx_article_detail WHERE url_hash = UNHEX(MD5(%s)) LIMIT 1",
-                                            (url,),
-                                        )
-                                        existing = await cur2.fetchone()
-
-                                    if not existing:
-                                        # Insert into wx_article_detail
-                                        async with conn.cursor() as cur2:
-                                            await cur2.execute(
-                                                """INSERT INTO wx_article_detail (article_list_id, title, url, pubtime, hashid, nick_name, author, content)
-                                                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                                                (
-                                                    None,  # article_list_id
-                                                    detail.get("title", ""),
-                                                    detail.get("url", ""),
-                                                    crawler._parse_pubtime(detail.get("pubtime")),
-                                                    detail.get("hashid", ""),
-                                                    detail.get("nick_name", ""),
-                                                    detail.get("author", ""),
-                                                    detail.get("content", ""),
-                                                ),
+                                    # Use a new connection for each database operation
+                                    async with Database.get_connection() as conn:
+                                        # Check if article already exists in wx_article_detail
+                                        async with conn.cursor() as cur:
+                                            await cur.execute(
+                                                "SELECT id FROM wx_article_detail WHERE url_hash = UNHEX(MD5(%s)) LIMIT 1",
+                                                (url,),
                                             )
-                                        logger.info(f"Fetched article: {detail.get('title', '')[:50]}")
+                                            existing = await cur.fetchone()
+
+                                        if not existing:
+                                            # Insert into wx_article_detail
+                                            async with conn.cursor() as cur:
+                                                await cur.execute(
+                                                    """INSERT INTO wx_article_detail (article_list_id, title, url, pubtime, hashid, nick_name, author, content)
+                                                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                                                    (
+                                                        None,  # article_list_id
+                                                        detail.get("title", ""),
+                                                        detail.get("url", ""),
+                                                        crawler._parse_pubtime(detail.get("pubtime")),
+                                                        detail.get("hashid", ""),
+                                                        detail.get("nick_name", ""),
+                                                        detail.get("author", ""),
+                                                        detail.get("content", ""),
+                                                    ),
+                                                )
+                                            logger.info(f"Fetched article: {detail.get('title', '')[:50]}")
 
                             except Exception as e:
-                                logger.error(f"Failed to fetch article detail for {account_name}: {e}")
+                                logger.exception(f"Failed to fetch article detail for {account_name}: {e}")
 
                     except Exception as e:
-                        logger.error(f"Failed to crawl articles from {account_name}: {e}")
+                        logger.exception(f"Failed to crawl articles from {account_name}: {e}")
 
-                # Now sync articles from wx_article_detail to raw_articles
-                async with conn.cursor() as cur:
-                    await cur.execute(
-                        """SELECT id, title, url, pubtime, nick_name, content
-                           FROM wx_article_detail
-                           WHERE DATE(FROM_UNIXTIME(pubtime)) = %s""",
-                        (report_date,),
-                    )
-                    rows = await cur.fetchall()
+                # Sync articles from wx_article_detail to raw_articles
+                async with Database.get_connection() as conn:
+                    async with conn.cursor() as cur:
+                        logger.info(f"Querying wx_article_detail for date: {report_date}")
+                        await cur.execute(
+                            """SELECT id, title, url, pubtime, nick_name, content
+                               FROM wx_article_detail
+                               WHERE DATE(FROM_UNIXTIME(pubtime)) = %s""",
+                            (report_date,),
+                        )
+                        rows = await cur.fetchall()
+                        logger.info(f"Found {len(rows)} articles in wx_article_detail for date {report_date}")
 
-                    if rows:
-                        # Insert into raw_articles
-                        for row in rows:
-                            await cur.execute(
-                                """INSERT INTO raw_articles (report_id, title, content, source_account, publish_time, url, article_detail_id)
-                                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                                (
-                                    report_id,
-                                    row[1],  # title
-                                    row[4],  # content
-                                    row[3],  # source_account (nick_name)
-                                    row[2],  # publish_time (pubtime)
-                                    row[1],  # url
-                                    row[0],  # article_detail_id
-                                ),
-                            )
-                        logger.info(f"Synced {len(rows)} articles from wx_article_detail to raw_articles")
+                        if rows:
+                            # Insert into raw_articles
+                            for row in rows:
+                                # Check if already exists
+                                await cur.execute(
+                                    "SELECT id FROM raw_articles WHERE article_detail_id = %s",
+                                    (row[0],),
+                                )
+                                existing = await cur.fetchone()
+                                if existing:
+                                    logger.debug(f"Article {row[0]} already in raw_articles, skipping")
+                                    continue
+
+                                await cur.execute(
+                                    """INSERT INTO raw_articles (report_id, title, content, source_account, publish_time, url, article_detail_id)
+                                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                                    (
+                                        report_id,
+                                        row[1],  # title
+                                        row[5],  # content (fixed: was row[4])
+                                        row[4],  # source_account (nick_name) (fixed: was row[3])
+                                        row[3],  # publish_time (pubtime) (fixed: was row[2])
+                                        row[2],  # url
+                                        row[0],  # article_detail_id
+                                    ),
+                                )
+                            logger.info(f"Synced {len(rows)} articles from wx_article_detail to raw_articles")
 
                     # Reload articles
                     articles = await get_report_articles(conn, report_id)
@@ -568,13 +591,15 @@ async def run_full_pipeline(conn: Connection, report_date: str) -> Dict[str, Any
 
         if not articles:
             logger.warning(f"No articles for report {report_id}, cannot continue pipeline")
-            await update_report_status(conn, report_id, "error")
+            async with Database.get_connection() as conn:
+                await update_report_status(conn, report_id, "error")
             result["status"] = "error"
             result["error"] = "No articles found"
             return result
 
         # Step 2: Extract topics
-        topics = await step2_extract_topics(conn, report_id)
+        async with Database.get_connection() as conn:
+            topics = await step2_extract_topics(conn, report_id)
         result["steps"]["step2"] = {
             "name": "热点风口",
             "completed": True,
@@ -583,13 +608,15 @@ async def run_full_pipeline(conn: Connection, report_date: str) -> Dict[str, Any
 
         if not topics:
             logger.warning(f"No topics extracted for report {report_id}")
-            await update_report_status(conn, report_id, "error")
+            async with Database.get_connection() as conn:
+                await update_report_status(conn, report_id, "error")
             result["status"] = "error"
             result["error"] = "No topics extracted"
             return result
 
         # Step 3: Get board stocks
-        pool1_count = await step3_get_board_stocks(conn, report_id)
+        async with Database.get_connection() as conn:
+            pool1_count = await step3_get_board_stocks(conn, report_id)
         result["steps"]["step3"] = {
             "name": "异动初筛",
             "completed": True,
@@ -598,24 +625,25 @@ async def run_full_pipeline(conn: Connection, report_date: str) -> Dict[str, Any
 
         if pool1_count == 0:
             logger.warning(f"No stocks in pool 1 for report {report_id}")
-            await update_report_status(conn, report_id, "error")
+            async with Database.get_connection() as conn:
+                await update_report_status(conn, report_id, "error")
             result["status"] = "error"
             result["error"] = "No stocks found"
             return result
 
         # Step 4: Apply rules
-        # Get rule configurations
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT rule_key, rule_value, is_enabled FROM strategy_config WHERE is_enabled = TRUE ORDER BY sort_order",
-            )
-            rows = await cur.fetchall()
-            rules_config = [
-                {"rule_key": row[0], "rule_value": row[1], "is_enabled": row[2]}
-                for row in rows
-            ]
+        async with Database.get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT rule_key, rule_value, is_enabled FROM strategy_config WHERE is_enabled = TRUE ORDER BY sort_order",
+                )
+                rows = await cur.fetchall()
+                rules_config = [
+                    {"rule_key": row[0], "rule_value": row[1], "is_enabled": row[2]}
+                    for row in rows
+                ]
 
-        selected_count = await step4_apply_rules(conn, report_id, rules_config)
+            selected_count = await step4_apply_rules(conn, report_id, rules_config)
         result["steps"]["step4"] = {
             "name": "深度精选",
             "completed": True,
@@ -624,12 +652,17 @@ async def run_full_pipeline(conn: Connection, report_date: str) -> Dict[str, Any
         }
 
         # Update status to completed
-        await update_report_status(conn, report_id, "completed")
+        async with Database.get_connection() as conn:
+            await update_report_status(conn, report_id, "completed")
         result["status"] = "completed"
 
     except Exception as e:
         logger.exception(f"Pipeline error for report {report_id}: {e}")
-        await update_report_status(conn, report_id, "error")
+        try:
+            async with Database.get_connection() as conn:
+                await update_report_status(conn, report_id, "error")
+        except Exception:
+            pass
         result["status"] = "error"
         result["error"] = str(e)
 

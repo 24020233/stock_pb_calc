@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """Reports API routes."""
 
+import asyncio
 import logging
 from typing import Any, List, Optional
 
 from aiomysql import Connection
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 
 from database import get_db
@@ -192,14 +193,15 @@ async def delete_report(
 @router.post("/{report_id}/generate", response_model=ApiResponse)
 async def generate_report(
     report_id: int,
+    background_tasks: BackgroundTasks,
     conn: Connection = Depends(get_db),
 ) -> ApiResponse:
-    """Run full pipeline to generate report."""
+    """Start pipeline to generate report (async)."""
     try:
         # Get report date first
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT report_date FROM reports WHERE id = %s",
+                "SELECT report_date, status FROM reports WHERE id = %s",
                 (report_id,),
             )
             row = await cur.fetchone()
@@ -207,22 +209,47 @@ async def generate_report(
             if not row:
                 raise HTTPException(status_code=404, detail="Report not found")
 
+            current_status = row[1]
+            if current_status == "processing":
+                raise HTTPException(status_code=400, detail="Report is already being processed")
+
             report_date = row[0].strftime("%Y-%m-%d") if row[0] else None
 
-        # Run pipeline
-        result = await pipeline_service.run_full_pipeline(conn, report_date)
+        # Update status to processing immediately
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE reports SET status = 'processing', updated_at = NOW() WHERE id = %s",
+                (report_id,),
+            )
+
+        # Start pipeline in background
+        background_tasks.add_task(run_pipeline_task, report_date)
 
         return ApiResponse(
             code=0,
-            msg="success",
-            data=result,
+            msg="Pipeline started",
+            data={
+                "report_id": report_id,
+                "report_date": report_date,
+                "status": "processing",
+            },
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Failed to generate report: {e}")
+        logger.exception(f"Failed to start pipeline: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def run_pipeline_task(report_date: str):
+    """Background task to run pipeline."""
+    try:
+        logger.info(f"Starting background pipeline for {report_date}")
+        result = await pipeline_service.run_full_pipeline(report_date)
+        logger.info(f"Pipeline completed for {report_date}: {result.get('status')}")
+    except Exception as e:
+        logger.exception(f"Pipeline failed for {report_date}: {e}")
 
 
 @router.get("/{report_id}/check", response_model=ApiResponse)

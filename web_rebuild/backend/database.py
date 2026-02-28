@@ -31,6 +31,9 @@ class Database:
                 autocommit=True,
                 minsize=1,
                 maxsize=10,
+                # Connection keep-alive settings
+                pool_recycle=1800,  # Recycle connections after 30 minutes
+                connect_timeout=10,  # Connection timeout in seconds
             )
         return cls._pool
 
