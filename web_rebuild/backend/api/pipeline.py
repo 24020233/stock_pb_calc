@@ -5,10 +5,10 @@ import logging
 from typing import Any, List, Optional
 
 from aiomysql import Connection
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 
-from database import get_db
+from database import get_db, Database
 import services.pipeline_service as pipeline_service
 
 logger = logging.getLogger(__name__)
@@ -140,3 +140,77 @@ async def get_pipeline_nodes(
     except Exception as e:
         logger.exception(f"Failed to get pipeline nodes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{report_id}/rerun/{step_number}", response_model=ApiResponse)
+async def rerun_step(
+    report_id: int,
+    step_number: int,
+    background_tasks: BackgroundTasks,
+    conn: Connection = Depends(get_db),
+) -> ApiResponse:
+    """Rerun a specific pipeline step.
+
+    Args:
+        report_id: Report ID
+        step_number: Step number (2, 3, or 4)
+    """
+    if step_number < 2 or step_number > 4:
+        raise HTTPException(status_code=400, detail="Step number must be 2, 3, or 4")
+
+    try:
+        # Check if report exists
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT id FROM reports WHERE id = %s", (report_id,))
+            if not await cur.fetchone():
+                raise HTTPException(status_code=404, detail="Report not found")
+
+        # Clear data for this step and subsequent steps
+        deleted = await pipeline_service.clear_step_data(conn, report_id, step_number)
+
+        # Start rerun in background
+        background_tasks.add_task(run_step_task, report_id, step_number)
+
+        return ApiResponse(
+            code=0,
+            msg=f"Step {step_number} rerun started",
+            data={"cleared": deleted, "step": step_number},
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to rerun step {step_number}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def run_step_task(report_id: int, step_number: int):
+    """Background task to run a single step."""
+    try:
+        logger.info(f"Starting background step {step_number} for report {report_id}")
+
+        async with Database.get_connection() as conn:
+            if step_number == 2:
+                result = await pipeline_service.step2_extract_topics(conn, report_id)
+                logger.info(f"Step 2 completed: {len(result)} topics extracted")
+
+            elif step_number == 3:
+                count = await pipeline_service.step3_get_board_stocks(conn, report_id)
+                logger.info(f"Step 3 completed: {count} stocks added to pool 1")
+
+            elif step_number == 4:
+                # Get rule configurations
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT rule_key, rule_value, is_enabled FROM strategy_config WHERE is_enabled = TRUE ORDER BY sort_order",
+                    )
+                    rows = await cur.fetchall()
+                    rules_config = [
+                        {"rule_key": row[0], "rule_value": row[1], "is_enabled": row[2]}
+                        for row in rows
+                    ]
+                count = await pipeline_service.step4_apply_rules(conn, report_id, rules_config)
+                logger.info(f"Step 4 completed: {count} stocks selected")
+
+    except Exception as e:
+        logger.exception(f"Step {step_number} failed for report {report_id}: {e}")

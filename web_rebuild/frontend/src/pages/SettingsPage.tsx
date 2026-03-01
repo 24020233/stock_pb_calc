@@ -75,7 +75,7 @@ export default function SettingsPage() {
   };
 
   const handleSaveRule = async (values: any) => {
-    if (!editingRule) {
+    if (editingRule) {
       try {
         setLoading(true);
         const ruleValue = {};

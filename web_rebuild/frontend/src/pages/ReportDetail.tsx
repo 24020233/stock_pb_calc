@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Card, Row, Col, Steps, Tabs, Table, Button, message, Spin, Typography, Tag, Space, Progress } from 'antd';
-import { PlayCircleOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Steps, Tabs, Table, Button, message, Spin, Typography, Tag, Space, Progress, Popconfirm } from 'antd';
+import { PlayCircleOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ReportSummary, PipelineNodes, StockPool2 } from '@/types';
 import { reportsApi, pipelineApi } from '@/services/api';
 
@@ -14,6 +14,7 @@ export default function ReportDetail() {
   const [pipelineData, setPipelineData] = useState<PipelineNodes | null>(null);
   const [activeNode, setActiveNode] = useState('step1');
   const [isPolling, setIsPolling] = useState(false);
+  const [rerunningStep, setRerunningStep] = useState<number | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load report data
@@ -83,6 +84,26 @@ export default function ReportDetail() {
       message.error(errorMsg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRerunStep = async (stepNumber: number) => {
+    if (!id) return;
+    try {
+      setRerunningStep(stepNumber);
+      const res = await pipelineApi.rerunStep(parseInt(id), stepNumber);
+      if (res.data.code === 0) {
+        message.success(`步骤 ${stepNumber} 重跑已开始...`);
+        setIsPolling(true);
+        loadReportData(parseInt(id));
+      } else {
+        message.error(res.data.msg || '重跑失败');
+      }
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.detail || error?.message || '重跑失败';
+      message.error(errorMsg);
+    } finally {
+      setRerunningStep(null);
     }
   };
 
@@ -346,10 +367,89 @@ export default function ReportDetail() {
                 activeKey={activeNode}
                 onChange={setActiveNode}
                 items={[
-                  { key: 'step1', label: `情报源 (${summary?.article_count || 0})`, children: renderStep1Content() },
-                  { key: 'step2', label: `热点风口 (${summary?.topic_count || 0})`, children: renderStep2Content() },
-                  { key: 'step3', label: `异动初筛 (${summary?.pool1_count || 0})`, children: renderStep3Content() },
-                  { key: 'step4', label: `深度精选 (${summary?.pool2_count || 0})`, children: renderStep4Content() },
+                  {
+                    key: 'step1',
+                    label: `情报源 (${summary?.article_count || 0})`,
+                    children: renderStep1Content()
+                  },
+                  {
+                    key: 'step2',
+                    label: (
+                      <Space>
+                        <span>热点风口 ({summary?.topic_count || 0})</span>
+                        <Popconfirm
+                          title="重跑热点风口"
+                          description="将清除热点风口及后续步骤的数据，确定重跑吗？"
+                          onConfirm={() => handleRerunStep(2)}
+                          okText="确定"
+                          cancelText="取消"
+                        >
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            loading={rerunningStep === 2}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            重跑
+                          </Button>
+                        </Popconfirm>
+                      </Space>
+                    ),
+                    children: renderStep2Content()
+                  },
+                  {
+                    key: 'step3',
+                    label: (
+                      <Space>
+                        <span>异动初筛 ({summary?.pool1_count || 0})</span>
+                        <Popconfirm
+                          title="重跑异动初筛"
+                          description="将清除异动初筛及后续步骤的数据，确定重跑吗？"
+                          onConfirm={() => handleRerunStep(3)}
+                          okText="确定"
+                          cancelText="取消"
+                        >
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            loading={rerunningStep === 3}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            重跑
+                          </Button>
+                        </Popconfirm>
+                      </Space>
+                    ),
+                    children: renderStep3Content()
+                  },
+                  {
+                    key: 'step4',
+                    label: (
+                      <Space>
+                        <span>深度精选 ({summary?.pool2_count || 0})</span>
+                        <Popconfirm
+                          title="重跑深度精选"
+                          description="确定要重新执行深度精选吗？"
+                          onConfirm={() => handleRerunStep(4)}
+                          okText="确定"
+                          cancelText="取消"
+                        >
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            loading={rerunningStep === 4}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            重跑
+                          </Button>
+                        </Popconfirm>
+                      </Space>
+                    ),
+                    children: renderStep4Content()
+                  },
                 ]}
               />
             </Card>

@@ -44,6 +44,8 @@ export const pipelineApi = {
     api.post<ApiResponse<{ stock_count: number }>>(`/pipeline/${reportId}/step3-pool1`),
   step4Pool2: (reportId: number) =>
     api.post<ApiResponse<{ selected_count: number }>>(`/pipeline/${reportId}/step4-pool2`),
+  rerunStep: (reportId: number, stepNumber: number) =>
+    api.post<ApiResponse<{ cleared: Record<string, number>; step: number }>>(`/pipeline/${reportId}/rerun/${stepNumber}`),
 };
 
 // Settings API

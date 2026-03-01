@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Settings API routes."""
 
+import json
 import logging
 from typing import Any, List, Optional
 
@@ -232,7 +233,7 @@ async def update_rule(
 
         if request.rule_value is not None:
             updates.append("rule_value = %s")
-            params.append(request.rule_value)
+            params.append(json.dumps(request.rule_value, ensure_ascii=False))
 
         if request.description is not None:
             updates.append("description = %s")

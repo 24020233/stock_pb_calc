@@ -119,6 +119,16 @@ async def extract_topics_from_articles(articles: List[Dict[str, Any]]) -> List[D
         )
 
         content = response.choices[0].message.content
+
+        # Strip markdown code block formatting if present
+        if content.strip().startswith("```"):
+            lines = content.strip().split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            content = "\n".join(lines)
+
         result = json.loads(content)
 
         return result.get("topics", [])
@@ -169,6 +179,16 @@ async def analyze_stock_uniqueness(stocks: List[Dict[str, Any]]) -> List[Dict[st
         )
 
         content = response.choices[0].message.content
+
+        # Strip markdown code block formatting if present
+        if content.strip().startswith("```"):
+            lines = content.strip().split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            content = "\n".join(lines)
+
         result = json.loads(content)
 
         return result.get("analysis", [])
