@@ -1,10 +1,11 @@
 #!/bin/bash
-# 蓝胖子自动选股系统 - 一键启动脚本
+# 蓝胖子自动选股系统 - 一键启动脚本 (macOS版)
 
 # 获取脚本所在目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/web_rebuild/backend"
 FRONTEND_DIR="$SCRIPT_DIR/web_rebuild/frontend"
+VENV_DIR="$SCRIPT_DIR/venv"
 
 # 颜色定义
 GREEN='\033[0;32m'
@@ -24,14 +25,14 @@ fi
 
 # 启动后端
 echo -e "${YELLOW}[1/2] 启动后端服务...${NC}"
-cd "$BACKEND_DIR"
 
 # 检查是否已在运行
-if netstat -ano | grep -q ":8002.*LISTENING" 2>/dev/null; then
+if lsof -i :8002 -t &>/dev/null; then
     echo -e "${YELLOW}后端服务已在运行 (端口 8002)${NC}"
 else
-    # 在 Windows 上使用 start 命令在新窗口启动
-    start "蓝胖子后端 - FastAPI" cmd /k "cd /d $(cygpath -w "$BACKEND_DIR" 2>/dev/null || echo "$BACKEND_DIR") && python main.py"
+    cd "$BACKEND_DIR"
+    # 在 macOS 上使用 osascript 在新终端窗口启动，使用虚拟环境
+    osascript -e "tell application \"Terminal\" to do script \"source '$VENV_DIR/bin/activate' && cd '$BACKEND_DIR' && python main.py\""
     echo -e "${GREEN}后端服务启动成功 (http://localhost:8002)${NC}"
     echo -e "${GREEN}API 文档: http://localhost:8002/docs${NC}"
 fi
@@ -41,13 +42,14 @@ sleep 2
 
 # 启动前端
 echo -e "${YELLOW}[2/2] 启动前端服务...${NC}"
-cd "$FRONTEND_DIR"
 
 # 检查是否已在运行
-if netstat -ano | grep -q ":3000.*LISTENING" 2>/dev/null; then
+if lsof -i :3000 -t &>/dev/null; then
     echo -e "${YELLOW}前端服务已在运行 (端口 3000)${NC}"
 else
-    start "蓝胖子前端 - React" cmd /k "cd /d $(cygpath -w "$FRONTEND_DIR" 2>/dev/null || echo "$FRONTEND_DIR") && npm run dev"
+    cd "$FRONTEND_DIR"
+    # 在 macOS 上使用 osascript 在新终端窗口启动
+    osascript -e "tell application \"Terminal\" to do script \"cd '$FRONTEND_DIR' && npm run dev\""
     echo -e "${GREEN}前端服务启动成功 (http://localhost:3000)${NC}"
 fi
 
