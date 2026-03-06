@@ -70,6 +70,7 @@ export interface StrategyRule {
   id: number;
   rule_key: string;
   rule_name: string;
+  rule_handler?: string;
   rule_value: Record<string, any>;
   description?: string;
   is_enabled: boolean;

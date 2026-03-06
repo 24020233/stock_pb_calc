@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS strategy_config (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   rule_key VARCHAR(128) NOT NULL COMMENT '规则标识',
   rule_name VARCHAR(128) NOT NULL COMMENT '规则名称',
+  rule_handler VARCHAR(256) NULL COMMENT '规则处理器识别码',
   rule_value JSON NOT NULL COMMENT '规则参数值',
   description TEXT NULL COMMENT '描述',
   is_enabled BOOLEAN NOT NULL DEFAULT TRUE COMMENT '是否启用',
@@ -180,3 +181,24 @@ CREATE TABLE IF NOT EXISTS strategy_config (
   PRIMARY KEY (id),
   UNIQUE KEY uk_rule_key (rule_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='策略参数配置表';
+
+
+-- 11. continuous_rise_data（连续上涨数据表）
+CREATE TABLE IF NOT EXISTS continuous_rise_data (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  stock_code VARCHAR(16) NOT NULL COMMENT '股票代码',
+  stock_name VARCHAR(64) NOT NULL COMMENT '股票简称',
+  close_price DECIMAL(10, 2) NULL COMMENT '收盘价(元)',
+  high_price DECIMAL(10, 2) NULL COMMENT '最高价(元)',
+  low_price DECIMAL(10, 2) NULL COMMENT '最低价(元)',
+  rise_days INT NULL COMMENT '连涨天数',
+  rise_pct DECIMAL(10, 4) NULL COMMENT '连续涨跌幅(%)',
+  turnover_rate DECIMAL(10, 4) NULL COMMENT '累计换手率(%)',
+  industry VARCHAR(64) NULL COMMENT '所属行业',
+  data_date DATE NOT NULL COMMENT '数据日期',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_date_code (data_date, stock_code),
+  KEY idx_data_date (data_date),
+  KEY idx_stock_code (stock_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='连续上涨数据表';

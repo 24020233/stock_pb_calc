@@ -58,8 +58,12 @@ export const settingsApi = {
   deleteAccount: (id: number) =>
     api.delete<ApiResponse<{ deleted: number }>>(`/settings/accounts/${id}`),
   listRules: () => api.get<ApiResponse<{ rules: StrategyRule[] }>>('/settings/rules'),
+  createRule: (data: { rule_key: string; rule_name: string; rule_handler?: string; rule_value?: Record<string, any>; description?: string; is_enabled?: boolean; sort_order?: number }) =>
+    api.post<ApiResponse<{ id: number; rule_key: string }>>('/settings/rules', data),
   updateRule: (key: string, data: Partial<StrategyRule>) =>
     api.patch<ApiResponse<{ updated: string }>>(`/settings/rules/${key}`, data),
+  deleteRule: (key: string) =>
+    api.delete<ApiResponse<{ deleted: string }>>(`/settings/rules/${key}`),
 };
 
 // Stocks API

@@ -42,10 +42,23 @@ class UpdateAccountRequest(BaseModel):
     sort_order: Optional[int] = None
 
 
+class CreateRuleRequest(BaseModel):
+    """Request model for creating rule config."""
+
+    rule_key: str
+    rule_name: str
+    rule_handler: Optional[str] = None
+    rule_value: Optional[Any] = None
+    description: Optional[str] = None
+    is_enabled: bool = True
+    sort_order: int = 0
+
+
 class UpdateRuleRequest(BaseModel):
     """Request model for updating rule config."""
 
     rule_name: Optional[str] = None
+    rule_handler: Optional[str] = None
     rule_value: Optional[Any] = None
     description: Optional[str] = None
     is_enabled: Optional[bool] = None
@@ -189,7 +202,8 @@ async def list_rules(
     try:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, rule_key, rule_name, rule_value, description, is_enabled, sort_order FROM strategy_config ORDER BY sort_order, id"
+                """SELECT id, rule_key, rule_name, rule_handler, rule_value, description, is_enabled, sort_order
+                   FROM strategy_config ORDER BY sort_order, id"""
             )
             rows = await cur.fetchall()
 
@@ -199,10 +213,11 @@ async def list_rules(
                 "id": row[0],
                 "rule_key": row[1],
                 "rule_name": row[2],
-                "rule_value": row[3] if isinstance(row[3], dict) else {},
-                "description": row[4],
-                "is_enabled": row[5],
-                "sort_order": row[6],
+                "rule_handler": row[3],
+                "rule_value": row[4] if isinstance(row[4], dict) else {},
+                "description": row[5],
+                "is_enabled": row[6],
+                "sort_order": row[7],
             })
 
         return ApiResponse(
@@ -213,6 +228,40 @@ async def list_rules(
 
     except Exception as e:
         logger.exception(f"Failed to list rules: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rules", response_model=ApiResponse)
+async def create_rule(
+    request: CreateRuleRequest,
+    conn: Connection = Depends(get_db),
+) -> ApiResponse:
+    """Create a new rule configuration."""
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO strategy_config (rule_key, rule_name, rule_handler, rule_value, description, is_enabled, sort_order)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (
+                    request.rule_key,
+                    request.rule_name,
+                    request.rule_handler,
+                    json.dumps(request.rule_value or {}, ensure_ascii=False),
+                    request.description,
+                    request.is_enabled,
+                    request.sort_order,
+                ),
+            )
+            rule_id = cur.lastrowid
+
+        return ApiResponse(
+            code=0,
+            msg="success",
+            data={"id": rule_id, "rule_key": request.rule_key},
+        )
+
+    except Exception as e:
+        logger.exception(f"Failed to create rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -230,6 +279,10 @@ async def update_rule(
         if request.rule_name is not None:
             updates.append("rule_name = %s")
             params.append(request.rule_name)
+
+        if request.rule_handler is not None:
+            updates.append("rule_handler = %s")
+            params.append(request.rule_handler)
 
         if request.rule_value is not None:
             updates.append("rule_value = %s")
@@ -264,4 +317,25 @@ async def update_rule(
 
     except Exception as e:
         logger.exception(f"Failed to update rule: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/rules/{rule_key}", response_model=ApiResponse)
+async def delete_rule(
+    rule_key: str,
+    conn: Connection = Depends(get_db),
+) -> ApiResponse:
+    """Delete rule configuration."""
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM strategy_config WHERE rule_key = %s", (rule_key,))
+
+        return ApiResponse(
+            code=0,
+            msg="success",
+            data={"deleted": rule_key},
+        )
+
+    except Exception as e:
+        logger.exception(f"Failed to delete rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
