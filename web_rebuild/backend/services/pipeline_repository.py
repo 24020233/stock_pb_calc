@@ -246,6 +246,51 @@ async def add_topic(conn: Connection, report_id: int, topic: Dict[str, Any], art
 # Stock Pool Operations
 # ============================================================================
 
+async def get_pool1_config(conn: Connection) -> Dict[str, Any]:
+    """Get pool 1 configuration.
+
+    Args:
+        conn: Database connection
+
+    Returns:
+        Configuration dictionary
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT config_key, config_value FROM pool1_config"
+        )
+        rows = await cur.fetchall()
+        config = {}
+        for row in rows:
+            key = row[0]
+            value = row[1]
+            # Try to parse as int if possible
+            try:
+                config[key] = int(value) if isinstance(value, str) else value
+            except (ValueError, TypeError):
+                config[key] = value
+        # Return default config if empty
+        if not config:
+            config = {"top_n_per_board": 10}
+        return config
+
+
+async def update_pool1_config(conn: Connection, config_key: str, config_value: Any) -> None:
+    """Update pool 1 configuration.
+
+    Args:
+        conn: Database connection
+        config_key: Configuration key
+        config_value: Configuration value
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """INSERT INTO pool1_config (config_key, config_value) VALUES (%s, %s)
+               ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)""",
+            (config_key, str(config_value)),
+        )
+
+
 async def get_report_pool1(conn: Connection, report_id: int) -> List[Dict[str, Any]]:
     """Get stock pool 1 for a report.
 
@@ -258,8 +303,12 @@ async def get_report_pool1(conn: Connection, report_id: int) -> List[Dict[str, A
     """
     async with conn.cursor() as cur:
         await cur.execute(
-            """SELECT id, stock_code, stock_name, related_topic_id, snapshot_data, match_reason
-               FROM stock_pool_1 WHERE report_id = %s""",
+            """SELECT id, stock_code, stock_name, related_topic_id, related_board,
+                      latest_price, change_pct, change_amount, volume, turnover,
+                      amplitude, high_price, low_price, open_price, prev_close,
+                      turnover_rate, pe_ratio, pb_ratio, snapshot_data, match_reason
+               FROM stock_pool_1 WHERE report_id = %s
+               ORDER BY related_board, change_pct DESC""",
             (report_id,),
         )
         rows = await cur.fetchall()
@@ -269,8 +318,22 @@ async def get_report_pool1(conn: Connection, report_id: int) -> List[Dict[str, A
                 "stock_code": row[1],
                 "stock_name": row[2],
                 "related_topic_id": row[3],
-                "snapshot_data": row[4] if isinstance(row[4], dict) else {},
-                "match_reason": row[5],
+                "related_board": row[4],
+                "latest_price": float(row[5]) if row[5] else None,
+                "change_pct": float(row[6]) if row[6] else None,
+                "change_amount": float(row[7]) if row[7] else None,
+                "volume": float(row[8]) if row[8] else None,
+                "turnover": float(row[9]) if row[9] else None,
+                "amplitude": float(row[10]) if row[10] else None,
+                "high_price": float(row[11]) if row[11] else None,
+                "low_price": float(row[12]) if row[12] else None,
+                "open_price": float(row[13]) if row[13] else None,
+                "prev_close": float(row[14]) if row[14] else None,
+                "turnover_rate": float(row[15]) if row[15] else None,
+                "pe_ratio": float(row[16]) if row[16] else None,
+                "pb_ratio": float(row[17]) if row[17] else None,
+                "snapshot_data": row[18] if isinstance(row[18], dict) else {},
+                "match_reason": row[19],
             }
             for row in rows
         ]
@@ -282,25 +345,62 @@ async def add_pool1_stock(conn: Connection, report_id: int, stock: Dict[str, Any
     Args:
         conn: Database connection
         report_id: Report ID
-        stock: Stock dictionary with stock_code, stock_name, related_topic_id, snapshot_data, match_reason
+        stock: Stock dictionary with all fields
 
     Returns:
         Stock pool 1 ID
     """
     async with conn.cursor() as cur:
         await cur.execute(
-            """INSERT INTO stock_pool_1 (report_id, stock_code, stock_name, related_topic_id, snapshot_data, match_reason)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
+            """INSERT INTO stock_pool_1
+               (report_id, stock_code, stock_name, related_topic_id, related_board,
+                latest_price, change_pct, change_amount, volume, turnover,
+                amplitude, high_price, low_price, open_price, prev_close,
+                turnover_rate, pe_ratio, pb_ratio, snapshot_data, match_reason)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 report_id,
                 stock.get("stock_code"),
                 stock.get("stock_name"),
                 stock.get("related_topic_id"),
-                stock.get("snapshot_data"),
+                stock.get("related_board"),
+                stock.get("latest_price"),
+                stock.get("change_pct"),
+                stock.get("change_amount"),
+                stock.get("volume"),
+                stock.get("turnover"),
+                stock.get("amplitude"),
+                stock.get("high_price"),
+                stock.get("low_price"),
+                stock.get("open_price"),
+                stock.get("prev_close"),
+                stock.get("turnover_rate"),
+                stock.get("pe_ratio"),
+                stock.get("pb_ratio"),
+                json.dumps(stock.get("snapshot_data", {}), ensure_ascii=False),
                 stock.get("match_reason"),
             ),
         )
         return cur.lastrowid
+
+
+async def check_pool1_stock_exists(conn: Connection, report_id: int, stock_code: str) -> bool:
+    """Check if a stock already exists in pool 1.
+
+    Args:
+        conn: Database connection
+        report_id: Report ID
+        stock_code: Stock code
+
+    Returns:
+        True if exists, False otherwise
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT 1 FROM stock_pool_1 WHERE report_id = %s AND stock_code = %s LIMIT 1",
+            (report_id, stock_code),
+        )
+        return await cur.fetchone() is not None
 
 
 async def get_report_pool2(conn: Connection, report_id: int, selected_only: bool = False) -> List[Dict[str, Any]]:

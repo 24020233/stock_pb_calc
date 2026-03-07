@@ -1,6 +1,27 @@
 # 东方财富-成份股
 描述: 东方财富-沪深板块-概念板块-板块成份
 限量: 单次返回当前时刻所有成份股
+## 输入参数
+名称	类型	描述
+symbol	str	symbol="融资融券"; 支持传入板块代码比如：BK0655，可以通过调用 ak.stock_board_concept_name_em() 查看东方财富-概念板块的所有行业名称
+## 输出参数
+名称	类型	描述
+序号	int64	-
+代码	object	-
+名称	object	-
+最新价	float64	-
+涨跌幅	float64	注意单位: %
+涨跌额	float64	-
+成交量	float64	注意单位: 手
+成交额	float64	-
+振幅	float64	注意单位: %
+最高	float64	-
+最低	float64	-
+今开	float64	-
+昨收	float64	-
+换手率	float64	注意单位: %
+市盈率-动态	float64	-
+市净率	float64	-
 ## 接口示例
 import akshare as ak
 stock_board_concept_cons_em_df = ak.stock_board_concept_cons_em(symbol="融资融券")

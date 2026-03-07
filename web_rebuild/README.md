@@ -48,12 +48,18 @@ web_rebuild/
 │   │   ├── crawler.py           # 公众号爬虫服务
 │   │   ├── llm_service.py       # LLM 服务（DeepSeek）
 │   │   ├── stock_service.py     # 股票数据服务（akshare）
-│   │   └── pipeline_service.py  # 选股流程编排
+│   │   ├── pipeline_service.py  # 选股流程编排
+│   │   └── rule_executor.py     # 规则任务执行器
 │   └── rules/
 │       ├── base.py              # 规则基类
 │       ├── technical.py         # 技术面规则
 │       ├── fundamental.py       # 基本面规则
-│       └── registry.py          # 规则注册器
+│       ├── registry.py          # 规则注册器
+│       └── handlers/            # 规则处理器模块
+│           ├── __init__.py
+│           ├── base.py          # 规则处理器基类
+│           ├── registry.py      # 处理器注册表
+│           └── continuous_rise.py  # 连续上涨规则处理器
 ├── frontend/
 │   ├── package.json
 │   ├── vite.config.ts
@@ -124,6 +130,33 @@ python migrate_v2_stock_picker.py
 # 初始化默认规则
 python init_rules.py
 ```
+
+> **注意**：如果是从旧版本升级，需要执行以下 SQL 语句添加新字段：
+>
+> ```sql
+> -- strategy_config 表新增 rule_handler 字段
+> ALTER TABLE strategy_config ADD COLUMN rule_handler VARCHAR(256) NULL COMMENT '规则处理器识别码' AFTER rule_name;
+>
+> -- 创建连续上涨数据表
+> CREATE TABLE IF NOT EXISTS continuous_rise_data (
+>   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+>   stock_code VARCHAR(16) NOT NULL COMMENT '股票代码',
+>   stock_name VARCHAR(64) NOT NULL COMMENT '股票简称',
+>   close_price DECIMAL(10, 2) NULL COMMENT '收盘价(元)',
+>   high_price DECIMAL(10, 2) NULL COMMENT '最高价(元)',
+>   low_price DECIMAL(10, 2) NULL COMMENT '最低价(元)',
+>   rise_days INT NULL COMMENT '连涨天数',
+>   rise_pct DECIMAL(10, 4) NULL COMMENT '连续涨跌幅(%)',
+>   turnover_rate DECIMAL(10, 4) NULL COMMENT '累计换手率(%)',
+>   industry VARCHAR(64) NULL COMMENT '所属行业',
+>   data_date DATE NOT NULL COMMENT '数据日期',
+>   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+>   PRIMARY KEY (id),
+>   UNIQUE KEY uk_date_code (data_date, stock_code),
+>   KEY idx_data_date (data_date),
+>   KEY idx_stock_code (stock_code)
+> ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='连续上涨数据表';
+> ```
 
 ### 3. 后端启动
 
@@ -206,7 +239,9 @@ npm run dev
 | PATCH | `/accounts/:id` | 更新公众号 |
 | DELETE | `/accounts/:id` | 删除公众号 |
 | GET | `/rules` | 获取规则列表 |
+| POST | `/rules` | 新增规则 |
 | PATCH | `/rules/:key` | 更新规则配置 |
+| DELETE | `/rules/:key` | 删除规则 |
 
 ### 股票数据 (`/api/stocks`)
 
@@ -219,9 +254,9 @@ npm run dev
 
 ## 规则引擎
 
-系统采用策略模式实现可插拔的规则引擎：
+系统采用策略模式实现可插拔的规则引擎，支持两种类型的规则：
 
-### 已实现规则
+### 1. 内置规则（原有）
 
 **技术面规则**
 - `market_cap` - 市值筛选
@@ -234,7 +269,78 @@ npm run dev
 - `pb_ratio` - 市净率筛选
 - `roe` - ROE 筛选
 
-### 添加自定义规则
+### 2. 规则任务系统（新增）
+
+规则任务系统支持通过前端配置新增选股规则，每个规则生成独立任务并行执行。
+
+#### 架构说明
+
+- **规则配置**：存储在 `strategy_config` 表，包含规则标识、处理器识别码、参数（JSON 格式）
+- **规则处理器**：后端实现的处理逻辑，通过识别码关联配置
+- **并行执行**：多个规则任务使用 `asyncio.gather` 并行执行
+
+#### 已实现规则处理器
+
+| 处理器识别码 | 功能描述 | 数据表 |
+|-------------|---------|--------|
+| `continuous_rise` | 连续上涨筛选 | `continuous_rise_data` |
+
+#### 前端配置新增规则
+
+1. 进入"设置"页面 → "选股规则配置"
+2. 点击"新增规则"按钮
+3. 填写规则信息：
+   - **规则标识**：唯一标识，如 `continuous_rise_filter`
+   - **规则名称**：显示名称，如 `连续上涨筛选`
+   - **处理器识别码**：后端注册的处理器，如 `continuous_rise`
+   - **规则参数**：JSON 格式的参数配置
+   - **是否启用**：开关控制
+4. 保存后规则将在选股流程中生效
+
+#### 添加自定义规则处理器
+
+1. 在 `rules/handlers/` 目录下创建新文件
+2. 继承 `BaseRuleHandler` 类
+3. 使用 `@register_handler` 装饰器注册
+4. 实现 `execute()` 方法
+
+```python
+from rules.handlers.base import BaseRuleHandler, RuleTaskResult
+from rules.handlers.registry import register_handler
+
+@register_handler
+class MyCustomHandler(BaseRuleHandler):
+    @property
+    def rule_key(self) -> str:
+        return "my_custom_handler"  # 处理器识别码
+
+    async def execute(
+        self,
+        stock_codes: List[str],
+        params: Dict[str, Any],
+        conn = None
+    ) -> RuleTaskResult:
+        """
+        执行规则逻辑
+
+        Args:
+            stock_codes: 输入的股票代码列表
+            params: 规则参数（从配置中读取）
+            conn: 数据库连接（可选）
+
+        Returns:
+            RuleTaskResult: 包含每只股票的规则判断数据
+        """
+        results = []
+        # 实现规则逻辑...
+        return RuleTaskResult(
+            rule_key=self.rule_key,
+            success=True,
+            data=results
+        )
+```
+
+### 添加内置规则（原有方式）
 
 1. 在 `rules/technical.py` 或 `rules/fundamental.py` 中继承 `BaseRule`
 2. 使用 `@register_rule` 装饰器注册
@@ -266,7 +372,8 @@ class MyCustomRule(BaseRule):
 - `stock_pool_1` - 异动初筛表
 - `stock_pool_2` - 深度精选表
 - `target_accounts` - 目标公众号列表
-- `strategy_config` - 策略参数配置表
+- `strategy_config` - 策略参数配置表（支持 `rule_handler` 字段）
+- `continuous_rise_data` - 连续上涨数据表
 - `wx_mp_account` - 公众号账号表（已有）
 - `wx_article_list` - 文章列表表（已有）
 - `wx_article_detail` - 文章详情表（已有）

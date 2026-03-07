@@ -58,7 +58,7 @@ def get_stocks_by_board(board_name: str) -> List[Dict[str, Any]]:
         board_name: Name of the board/sector (e.g., "人工智能", "新能源汽车")
 
     Returns:
-        List of stock dictionaries with code, name, and basic info
+        List of stock dictionaries with full info from akshare
     """
     try:
         # Try to get stocks by board name
@@ -79,8 +79,17 @@ def get_stocks_by_board(board_name: str) -> List[Dict[str, Any]]:
                 "name": row.get("名称", ""),
                 "latest_price": row.get("最新价", 0),
                 "change_pct": row.get("涨跌幅", 0),
+                "change_amount": row.get("涨跌额", 0),
                 "volume": row.get("成交量", 0),
                 "turnover": row.get("成交额", 0),
+                "amplitude": row.get("振幅", 0),
+                "high": row.get("最高", 0),
+                "low": row.get("最低", 0),
+                "open": row.get("今开", 0),
+                "prev_close": row.get("昨收", 0),
+                "turnover_rate": row.get("换手率", 0),
+                "pe_ratio": row.get("市盈率-动态", 0),
+                "pb_ratio": row.get("市净率", 0),
             })
 
         return stocks

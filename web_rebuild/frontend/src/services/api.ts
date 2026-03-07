@@ -64,6 +64,10 @@ export const settingsApi = {
     api.patch<ApiResponse<{ updated: string }>>(`/settings/rules/${key}`, data),
   deleteRule: (key: string) =>
     api.delete<ApiResponse<{ deleted: string }>>(`/settings/rules/${key}`),
+  // Pool1 Config
+  getPool1Config: () => api.get<ApiResponse<{ config: { top_n_per_board: number } }>>('/settings/pool1-config'),
+  updatePool1Config: (data: { top_n_per_board: number }) =>
+    api.patch<ApiResponse<{ updated: boolean }>>('/settings/pool1-config', data),
 };
 
 // Stocks API

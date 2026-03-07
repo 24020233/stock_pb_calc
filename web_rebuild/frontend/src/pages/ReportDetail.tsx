@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Card, Row, Col, Steps, Tabs, Table, Button, message, Spin, Typography, Tag, Space, Progress, Popconfirm } from 'antd';
-import { PlayCircleOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Steps, Tabs, Table, Button, message, Spin, Typography, Tag, Space, Progress, Popconfirm, InputNumber, Modal, Form } from 'antd';
+import { PlayCircleOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
 import type { ReportSummary, PipelineNodes, StockPool2 } from '@/types';
-import { reportsApi, pipelineApi } from '@/services/api';
+import { reportsApi, pipelineApi, settingsApi } from '@/services/api';
 
 const { Title, Text } = Typography;
 
@@ -16,6 +16,11 @@ export default function ReportDetail() {
   const [isPolling, setIsPolling] = useState(false);
   const [rerunningStep, setRerunningStep] = useState<number | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Pool1 config state
+  const [pool1Config, setPool1Config] = useState<{ top_n_per_board: number }>({ top_n_per_board: 10 });
+  const [configModalVisible, setConfigModalVisible] = useState(false);
+  const [configForm] = Form.useForm();
 
   // Load report data
   const loadReportData = useCallback(async (reportId: number) => {
@@ -46,8 +51,33 @@ export default function ReportDetail() {
   useEffect(() => {
     if (id) {
       loadReportData(parseInt(id));
+      loadPool1Config();
     }
   }, [id, loadReportData]);
+
+  // Load pool1 config
+  const loadPool1Config = async () => {
+    try {
+      const res = await settingsApi.getPool1Config();
+      if (res.data.code === 0 && res.data.data?.config) {
+        setPool1Config(res.data.data.config);
+      }
+    } catch (error) {
+      // Ignore config load errors
+    }
+  };
+
+  // Save pool1 config
+  const handleSaveConfig = async (values: { top_n_per_board: number }) => {
+    try {
+      await settingsApi.updatePool1Config(values);
+      setPool1Config(values);
+      message.success('配置已保存');
+      setConfigModalVisible(false);
+    } catch (error) {
+      message.error('保存配置失败');
+    }
+  };
 
   // Polling effect
   useEffect(() => {
@@ -214,18 +244,130 @@ export default function ReportDetail() {
   const renderStep3Content = () => {
     const data = pipelineData?.step3.data || [];
     const columns = [
-      { title: '股票代码', dataIndex: 'stock_code', key: 'stock_code', width: 100 },
-      { title: '股票名称', dataIndex: 'stock_name', key: 'stock_name', width: 100 },
-      { title: '入选理由', dataIndex: 'match_reason', key: 'match_reason' },
+      {
+        title: '所属板块',
+        dataIndex: 'related_board',
+        key: 'related_board',
+        width: 120,
+        sorter: (a: any, b: any) => (a.related_board || '').localeCompare(b.related_board || ''),
+      },
+      {
+        title: '股票代码',
+        dataIndex: 'stock_code',
+        key: 'stock_code',
+        width: 100,
+        sorter: (a: any, b: any) => (a.stock_code || '').localeCompare(b.stock_code || ''),
+      },
+      {
+        title: '股票名称',
+        dataIndex: 'stock_name',
+        key: 'stock_name',
+        width: 100,
+      },
+      {
+        title: '最新价',
+        dataIndex: 'latest_price',
+        key: 'latest_price',
+        width: 90,
+        align: 'right' as const,
+        render: (v: number) => v?.toFixed(2) || '-',
+        sorter: (a: any, b: any) => (a.latest_price || 0) - (b.latest_price || 0),
+      },
+      {
+        title: '涨跌幅(%)',
+        dataIndex: 'change_pct',
+        key: 'change_pct',
+        width: 100,
+        align: 'right' as const,
+        render: (v: number) => {
+          const color = v > 0 ? '#cf1322' : v < 0 ? '#3f8600' : '#666';
+          return <span style={{ color, fontWeight: 'bold' }}>{v?.toFixed(2) || '-'}</span>;
+        },
+        sorter: (a: any, b: any) => (a.change_pct || 0) - (b.change_pct || 0),
+        defaultSortOrder: 'descend' as const,
+      },
+      {
+        title: '涨跌额',
+        dataIndex: 'change_amount',
+        key: 'change_amount',
+        width: 90,
+        align: 'right' as const,
+        render: (v: number) => v?.toFixed(2) || '-',
+      },
+      {
+        title: '成交量(手)',
+        dataIndex: 'volume',
+        key: 'volume',
+        width: 110,
+        align: 'right' as const,
+        render: (v: number) => v ? (v / 10000).toFixed(2) + '万' : '-',
+        sorter: (a: any, b: any) => (a.volume || 0) - (b.volume || 0),
+      },
+      {
+        title: '成交额',
+        dataIndex: 'turnover',
+        key: 'turnover',
+        width: 110,
+        align: 'right' as const,
+        render: (v: number) => v ? (v / 100000000).toFixed(2) + '亿' : '-',
+        sorter: (a: any, b: any) => (a.turnover || 0) - (b.turnover || 0),
+      },
+      {
+        title: '换手率(%)',
+        dataIndex: 'turnover_rate',
+        key: 'turnover_rate',
+        width: 100,
+        align: 'right' as const,
+        render: (v: number) => v?.toFixed(2) || '-',
+        sorter: (a: any, b: any) => (a.turnover_rate || 0) - (b.turnover_rate || 0),
+      },
+      {
+        title: '市盈率',
+        dataIndex: 'pe_ratio',
+        key: 'pe_ratio',
+        width: 90,
+        align: 'right' as const,
+        render: (v: number) => v?.toFixed(2) || '-',
+        sorter: (a: any, b: any) => (a.pe_ratio || 0) - (b.pe_ratio || 0),
+      },
+      {
+        title: '市净率',
+        dataIndex: 'pb_ratio',
+        key: 'pb_ratio',
+        width: 90,
+        align: 'right' as const,
+        render: (v: number) => v?.toFixed(2) || '-',
+        sorter: (a: any, b: any) => (a.pb_ratio || 0) - (b.pb_ratio || 0),
+      },
     ];
     return (
-      <Table
-        dataSource={data}
-        columns={columns}
-        rowKey="id"
-        pagination={{ pageSize: 10 }}
-        locale={{ emptyText: '暂无数据' }}
-      />
+      <div>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Space>
+            <Text type="secondary">每板块取前 <Text strong>{pool1Config.top_n_per_board}</Text> 名</Text>
+            <Button
+              size="small"
+              icon={<SettingOutlined />}
+              onClick={() => {
+                configForm.setFieldsValue(pool1Config);
+                setConfigModalVisible(true);
+              }}
+            >
+              配置
+            </Button>
+          </Space>
+          <Text type="secondary">共 {data.length} 只股票（已去重）</Text>
+        </div>
+        <Table
+          dataSource={data}
+          columns={columns}
+          rowKey="id"
+          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+          locale={{ emptyText: '暂无数据' }}
+          scroll={{ x: 1200 }}
+          size="small"
+        />
+      </div>
     );
   };
 
@@ -455,6 +597,34 @@ export default function ReportDetail() {
             </Card>
           </Col>
         </Row>
+
+        {/* Pool1 Config Modal */}
+        <Modal
+          title="股票池1配置"
+          open={configModalVisible}
+          onOk={() => configForm.submit()}
+          onCancel={() => setConfigModalVisible(false)}
+          okText="保存"
+          cancelText="取消"
+        >
+          <Form
+            form={configForm}
+            onFinish={handleSaveConfig}
+            layout="vertical"
+          >
+            <Form.Item
+              name="top_n_per_board"
+              label="每板块取前N名"
+              rules={[{ required: true, message: '请输入N值' }]}
+              extra="按涨跌幅排序后，每个板块取前N只股票"
+            >
+              <InputNumber min={1} max={100} style={{ width: '100%' }} />
+            </Form.Item>
+          </Form>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            修改配置后，需要点击"重跑"才能生效
+          </Text>
+        </Modal>
       </div>
     </Spin>
   );

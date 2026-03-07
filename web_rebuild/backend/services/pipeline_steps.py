@@ -67,19 +67,26 @@ async def step2_extract_topics(conn: Connection, report_id: int) -> List[Dict[st
 # Step 3: Board Stocks (异动初筛)
 # ============================================================================
 
-async def step3_get_board_stocks(conn: Connection, report_id: int) -> int:
+async def step3_get_board_stocks(conn: Connection, report_id: int, top_n: int = 10) -> int:
     """Step 3: Get stocks from board names in topics.
 
     Args:
         conn: Database connection
         report_id: Report ID
+        top_n: Number of top stocks to take per board (sorted by change_pct)
 
     Returns:
         Number of stocks added to pool 1
     """
     topics = await repo.get_report_topics(conn, report_id)
 
-    stock_count = 0
+    # Get config
+    config = await repo.get_pool1_config(conn)
+    top_n = config.get("top_n_per_board", top_n)
+
+    # Track all stocks with their board info for deduplication
+    all_stocks: Dict[str, Dict[str, Any]] = {}  # stock_code -> stock_data
+
     for topic in topics:
         topic_id = topic["id"]
         related_boards = topic.get("related_boards", [])
@@ -88,24 +95,74 @@ async def step3_get_board_stocks(conn: Connection, report_id: int) -> int:
             try:
                 stocks = stock_service.get_stocks_by_board(board_name)
 
-                for stock in stocks:
-                    # Get stock snapshot
-                    stock_code = stock.get("code")
-                    snapshot = stock_service.get_stock_snapshot(stock_code)
+                if not stocks:
+                    logger.warning(f"No stocks found for board: {board_name}")
+                    continue
 
-                    # Save to pool 1
-                    await repo.add_pool1_stock(conn, report_id, {
+                # Sort by change_pct descending
+                stocks_sorted = sorted(
+                    stocks,
+                    key=lambda x: float(x.get("change_pct", 0) or 0),
+                    reverse=True
+                )
+
+                # Take top N
+                top_stocks = stocks_sorted[:top_n]
+
+                for stock in top_stocks:
+                    stock_code = stock.get("code")
+                    if not stock_code:
+                        continue
+
+                    # Check if already exists (deduplication)
+                    if stock_code in all_stocks:
+                        # Already exists, append board name to related_board
+                        existing = all_stocks[stock_code]
+                        existing_boards = existing.get("_all_boards", [])
+                        if board_name not in existing_boards:
+                            existing_boards.append(board_name)
+                            existing["_all_boards"] = existing_boards
+                        continue
+
+                    # Add new stock
+                    all_stocks[stock_code] = {
                         "stock_code": stock_code,
                         "stock_name": stock.get("name"),
                         "related_topic_id": topic_id,
-                        "snapshot_data": snapshot,
+                        "related_board": board_name,
+                        "latest_price": stock.get("latest_price"),
+                        "change_pct": stock.get("change_pct"),
+                        "change_amount": stock.get("change_amount"),
+                        "volume": stock.get("volume"),
+                        "turnover": stock.get("turnover"),
+                        "amplitude": stock.get("amplitude"),
+                        "high_price": stock.get("high"),
+                        "low_price": stock.get("low"),
+                        "open_price": stock.get("open"),
+                        "prev_close": stock.get("prev_close"),
+                        "turnover_rate": stock.get("turnover_rate"),
+                        "pe_ratio": stock.get("pe_ratio"),
+                        "pb_ratio": stock.get("pb_ratio"),
+                        "snapshot_data": {},
                         "match_reason": f"来自板块: {board_name}",
-                    })
-                    stock_count += 1
+                        "_all_boards": [board_name],
+                    }
 
             except Exception as e:
                 logger.error(f"Failed to get stocks for board {board_name}: {e}")
 
+    # Save all stocks to database
+    stock_count = 0
+    for stock_data in all_stocks.values():
+        # Clean up internal field
+        all_boards = stock_data.pop("_all_boards", [])
+        if len(all_boards) > 1:
+            stock_data["match_reason"] = f"来自板块: {', '.join(all_boards)}"
+
+        await repo.add_pool1_stock(conn, report_id, stock_data)
+        stock_count += 1
+
+    logger.info(f"Step 3 completed: {stock_count} stocks added to pool 1 (top {top_n} per board, deduplicated)")
     return stock_count
 
 

@@ -117,16 +117,50 @@ CREATE TABLE IF NOT EXISTS stock_pool_1 (
   stock_code VARCHAR(32) NOT NULL COMMENT '股票代码',
   stock_name VARCHAR(128) NOT NULL COMMENT '股票名称',
   related_topic_id BIGINT UNSIGNED NULL COMMENT '关联 hot_topics.id',
-  snapshot_data JSON NULL COMMENT '行情快照: price, change_pct, volume_ratio等',
+  related_board VARCHAR(128) NULL COMMENT '所属板块名称',
+  latest_price DECIMAL(10, 2) NULL COMMENT '最新价(元)',
+  change_pct DECIMAL(10, 4) NULL COMMENT '涨跌幅(%)',
+  change_amount DECIMAL(10, 4) NULL COMMENT '涨跌额(元)',
+  volume DECIMAL(20, 2) NULL COMMENT '成交量(手)',
+  turnover DECIMAL(20, 2) NULL COMMENT '成交额(元)',
+  amplitude DECIMAL(10, 4) NULL COMMENT '振幅(%)',
+  high_price DECIMAL(10, 2) NULL COMMENT '最高价(元)',
+  low_price DECIMAL(10, 2) NULL COMMENT '最低价(元)',
+  open_price DECIMAL(10, 2) NULL COMMENT '今开(元)',
+  prev_close DECIMAL(10, 2) NULL COMMENT '昨收(元)',
+  turnover_rate DECIMAL(10, 4) NULL COMMENT '换手率(%)',
+  pe_ratio DECIMAL(10, 4) NULL COMMENT '市盈率-动态',
+  pb_ratio DECIMAL(10, 4) NULL COMMENT '市净率',
+  snapshot_data JSON NULL COMMENT '行情快照(备用)',
   match_reason VARCHAR(512) NULL COMMENT '入选理由',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_report_id (report_id),
   KEY idx_topic_id (related_topic_id),
   KEY idx_stock_code (stock_code),
+  KEY idx_related_board (related_board),
+  KEY idx_change_pct (change_pct),
   CONSTRAINT fk_pool1_report FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
   CONSTRAINT fk_pool1_topic FOREIGN KEY (related_topic_id) REFERENCES hot_topics(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='异动初筛表';
+
+
+-- 7.1 pool1_config（股票池1配置表）
+CREATE TABLE IF NOT EXISTS pool1_config (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  config_key VARCHAR(64) NOT NULL COMMENT '配置键',
+  config_value JSON NOT NULL COMMENT '配置值',
+  description TEXT NULL COMMENT '配置描述',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_config_key (config_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='股票池1配置表';
+
+-- 初始化默认配置
+INSERT INTO pool1_config (config_key, config_value, description) VALUES
+('top_n_per_board', '10', '每个板块取涨跌幅前N名')
+ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
 
 
 -- 8. stock_pool_2（深度精选表 - 节点4产出）

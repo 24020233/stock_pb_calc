@@ -339,3 +339,76 @@ async def delete_rule(
     except Exception as e:
         logger.exception(f"Failed to delete rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Pool 1 Configuration
+# ============================================================================
+
+
+class UpdatePool1ConfigRequest(BaseModel):
+    """Request model for updating pool1 config."""
+
+    top_n_per_board: Optional[int] = None
+
+
+@router.get("/pool1-config", response_model=ApiResponse)
+async def get_pool1_config(
+    conn: Connection = Depends(get_db),
+) -> ApiResponse:
+    """Get pool 1 configuration."""
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT config_key, config_value FROM pool1_config"
+            )
+            rows = await cur.fetchall()
+
+        config = {}
+        for row in rows:
+            key = row[0]
+            value = row[1]
+            try:
+                config[key] = int(value) if isinstance(value, str) else value
+            except (ValueError, TypeError):
+                config[key] = value
+
+        # Return default config if empty
+        if not config:
+            config = {"top_n_per_board": 10}
+
+        return ApiResponse(
+            code=0,
+            msg="success",
+            data={"config": config},
+        )
+
+    except Exception as e:
+        logger.exception(f"Failed to get pool1 config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/pool1-config", response_model=ApiResponse)
+async def update_pool1_config(
+    request: UpdatePool1ConfigRequest,
+    conn: Connection = Depends(get_db),
+) -> ApiResponse:
+    """Update pool 1 configuration."""
+    try:
+        if request.top_n_per_board is not None:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """INSERT INTO pool1_config (config_key, config_value) VALUES ('top_n_per_board', %s)
+                       ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)""",
+                    (str(request.top_n_per_board),),
+                )
+
+        return ApiResponse(
+            code=0,
+            msg="success",
+            data={"updated": True},
+        )
+
+    except Exception as e:
+        logger.exception(f"Failed to update pool1 config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
