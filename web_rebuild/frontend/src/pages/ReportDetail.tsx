@@ -166,10 +166,11 @@ export default function ReportDetail() {
   const getCurrentStep = () => {
     if (!summary) return 0;
     if (summary.status === 'error') return 0;
-    if (summary.pool2_count > 0) return 4;
-    if (summary.pool1_count > 0) return 3;
-    if (summary.topic_count > 0) return 2;
-    if (summary.article_count > 0) return 1;
+    if (summary.pool2_count > 0) return 4; // step5 (0-indexed as 4)
+    // step4 (异动筛选) - 功能待实现，暂时跳过
+    if (summary.pool1_count > 0) return 2; // step3
+    if (summary.topic_count > 0) return 1;
+    if (summary.article_count > 0) return 0;
     return 0;
   };
 
@@ -177,12 +178,13 @@ export default function ReportDetail() {
     if (!summary) return 0;
     if (summary.status === 'completed') return 100;
     if (summary.status === 'error') return 0;
-    // Calculate progress based on completed steps
+    // Calculate progress based on completed steps (5 steps = 20% each)
     let progress = 0;
-    if (summary.article_count > 0) progress += 25;
-    if (summary.topic_count > 0) progress += 25;
-    if (summary.pool1_count > 0) progress += 25;
-    if (summary.pool2_count > 0) progress += 25;
+    if (summary.article_count > 0) progress += 20;
+    if (summary.topic_count > 0) progress += 20;
+    if (summary.pool1_count > 0) progress += 20;
+    // step4 (异动筛选) - 功能待实现，暂时跳过
+    if (summary.pool2_count > 0) progress += 20;
     return progress;
   };
 
@@ -372,7 +374,16 @@ export default function ReportDetail() {
   };
 
   const renderStep4Content = () => {
-    const data = (pipelineData?.step4.data || []).filter((s: StockPool2) => s.is_selected);
+    // 异动筛选 - 功能待实现
+    return (
+      <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>
+        <Text type="secondary">功能开发中，敬请期待...</Text>
+      </div>
+    );
+  };
+
+  const renderStep5Content = () => {
+    const data = (pipelineData?.step5.data || []).filter((s: StockPool2) => s.is_selected);
     const columns = [
       { title: '股票代码', dataIndex: 'stock_code', key: 'stock_code', width: 100 },
       { title: '股票名称', dataIndex: 'stock_name', key: 'stock_name', width: 100 },
@@ -421,13 +432,18 @@ export default function ReportDetail() {
       status: summary?.topic_count ? 'finish' : 'wait'
     },
     {
-      title: '异动初筛',
+      title: '股票池1',
       key: 'step3',
       status: summary?.pool1_count ? 'finish' : 'wait'
     },
     {
-      title: '深度精选',
+      title: '异动筛选',
       key: 'step4',
+      status: 'wait' // TODO: 功能待实现
+    },
+    {
+      title: '深度精选',
+      key: 'step5',
       status: summary?.pool2_count ? 'finish' : 'wait'
     },
   ];
@@ -464,8 +480,16 @@ export default function ReportDetail() {
                   <Progress
                     percent={getStepProgress()}
                     status="active"
-                    format={() => '正在处理...'}
+                    format={() => summary?.progress_info?.message || '正在处理...'}
                   />
+                  {summary?.progress_info && (
+                    <div style={{ marginTop: 8, textAlign: 'center' }}>
+                      <Text type="secondary">
+                        {summary.progress_info.current}/{summary.progress_info.total}
+                        {summary.progress_info.step === 'step3' && ' 个板块'}
+                      </Text>
+                    </div>
+                  )}
                 </div>
               )}
               <Row gutter={16}>
@@ -544,10 +568,10 @@ export default function ReportDetail() {
                     key: 'step3',
                     label: (
                       <Space>
-                        <span>异动初筛 ({summary?.pool1_count || 0})</span>
+                        <span>股票池1 ({summary?.pool1_count || 0})</span>
                         <Popconfirm
-                          title="重跑异动初筛"
-                          description="将清除异动初筛及后续步骤的数据，确定重跑吗？"
+                          title="重跑股票池1"
+                          description="将清除股票池1及后续步骤的数据，确定重跑吗？"
                           onConfirm={() => handleRerunStep(3)}
                           okText="确定"
                           cancelText="取消"
@@ -570,6 +594,15 @@ export default function ReportDetail() {
                     key: 'step4',
                     label: (
                       <Space>
+                        <span>异动筛选</span>
+                      </Space>
+                    ),
+                    children: renderStep4Content()
+                  },
+                  {
+                    key: 'step5',
+                    label: (
+                      <Space>
                         <span>深度精选 ({summary?.pool2_count || 0})</span>
                         <Popconfirm
                           title="重跑深度精选"
@@ -590,7 +623,7 @@ export default function ReportDetail() {
                         </Popconfirm>
                       </Space>
                     ),
-                    children: renderStep4Content()
+                    children: renderStep5Content()
                   },
                 ]}
               />

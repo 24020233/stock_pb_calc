@@ -17,6 +17,12 @@ export interface ReportSummary extends Report {
   topic_count: number;
   pool1_count: number;
   pool2_count: number;
+  progress_info?: {
+    step: string;
+    current: number;
+    total: number;
+    message: string;
+  } | null;
 }
 
 export interface RawArticle {
@@ -91,6 +97,10 @@ export interface PipelineNodes {
     data: StockPool1[];
   };
   step4: {
+    name: string;
+    data: any[]; // 异动筛选 - 功能待实现
+  };
+  step5: {
     name: string;
     data: StockPool2[];
   };

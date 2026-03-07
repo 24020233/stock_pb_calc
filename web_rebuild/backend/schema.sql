@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS reports (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   report_date DATE NOT NULL COMMENT '报告日期',
   status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT '状态: pending, processing, completed, error',
+  progress_info JSON NULL COMMENT '进度信息: {"step": "step3", "current": 5, "total": 20, "message": "正在获取板块数据..."}',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -236,3 +237,9 @@ CREATE TABLE IF NOT EXISTS continuous_rise_data (
   KEY idx_data_date (data_date),
   KEY idx_stock_code (stock_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='连续上涨数据表';
+
+
+-- ============================================================================
+-- Migration: Add progress_info column to reports table (run if column doesn't exist)
+-- ============================================================================
+-- ALTER TABLE reports ADD COLUMN progress_info JSON NULL COMMENT '进度信息' AFTER status;

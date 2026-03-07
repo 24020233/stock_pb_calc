@@ -340,10 +340,14 @@ async def get_pipeline_nodes(conn: Connection, report_id: int) -> Dict[str, Any]
             "data": await repo.get_report_topics(conn, report_id),
         },
         "step3": {
-            "name": "异动初筛",
+            "name": "股票池1",
             "data": await repo.get_report_pool1(conn, report_id),
         },
         "step4": {
+            "name": "异动筛选",
+            "data": [],  # TODO: 功能待实现
+        },
+        "step5": {
             "name": "深度精选",
             "data": await repo.get_report_pool2(conn, report_id),
         },

@@ -311,13 +311,22 @@ async def get_report_summary(
         async with conn.cursor() as cur:
             # Get basic info
             await cur.execute(
-                "SELECT report_date, status FROM reports WHERE id = %s",
+                "SELECT report_date, status, progress_info FROM reports WHERE id = %s",
                 (report_id,),
             )
             row = await cur.fetchone()
 
             if not row:
                 raise HTTPException(status_code=404, detail="Report not found")
+
+            progress_info = row[2]
+            # Parse progress_info if it's a string
+            if isinstance(progress_info, str):
+                import json
+                try:
+                    progress_info = json.loads(progress_info)
+                except (json.JSONDecodeError, TypeError):
+                    progress_info = None
 
             # Get counts
             await cur.execute(
@@ -351,6 +360,7 @@ async def get_report_summary(
                 "id": report_id,
                 "report_date": row[0].strftime("%Y-%m-%d") if row[0] else None,
                 "status": row[1],
+                "progress_info": progress_info,
                 "article_count": article_count,
                 "topic_count": topic_count,
                 "pool1_count": pool1_count,

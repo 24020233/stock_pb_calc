@@ -74,6 +74,47 @@ async def update_report_status(conn: Connection, report_id: int, status: str) ->
         )
 
 
+async def update_report_progress(conn: Connection, report_id: int, progress_info: Dict[str, Any]) -> None:
+    """Update report progress info.
+
+    Args:
+        conn: Database connection
+        report_id: Report ID
+        progress_info: Progress information dict with step, current, total, message
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE reports SET progress_info = %s, updated_at = NOW() WHERE id = %s",
+            (json.dumps(progress_info, ensure_ascii=False), report_id),
+        )
+
+
+async def get_report_progress(conn: Connection, report_id: int) -> Optional[Dict[str, Any]]:
+    """Get report progress info.
+
+    Args:
+        conn: Database connection
+        report_id: Report ID
+
+    Returns:
+        Progress info dict or None
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT progress_info FROM reports WHERE id = %s",
+            (report_id,),
+        )
+        row = await cur.fetchone()
+        if row and row[0]:
+            if isinstance(row[0], str):
+                try:
+                    return json.loads(row[0])
+                except (json.JSONDecodeError, TypeError):
+                    return None
+            return row[0]
+        return None
+
+
 async def clear_step_data(conn: Connection, report_id: int, step_number: int) -> Dict[str, int]:
     """Clear data for a specific step and all subsequent steps.
 
