@@ -68,7 +68,7 @@ def fetch_board_stocks(driver: webdriver.Chrome, sector_id: str, sector_name: st
         driver.get(url)
 
         # 等待页面加载完成
-        time.sleep(0.5)
+        time.sleep(2)
 
         text_content = driver.execute_script("return document.body.innerText;")
 
