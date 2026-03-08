@@ -51,18 +51,20 @@ async def step2_extract_topics(conn: Connection, report_id: int) -> List[Dict[st
         List of topic dictionaries
     """
     articles = await repo.get_report_articles(conn, report_id)
+    sector_names = await repo.get_sector_names(conn)
 
     if not articles:
         logger.warning(f"No articles found for report {report_id}")
         return []
 
     # Extract topics using LLM
-    topics = await llm_service.extract_topics_from_articles(articles)
+    topics = await llm_service.extract_topics_from_articles(articles, sector_names)
 
     # Save topics to database
-    article_ids = [a.get("id") for a in articles if a.get("id")]
+    default_article_ids = [a.get("id") for a in articles if a.get("id")]
     for topic in topics:
-        await repo.add_topic(conn, report_id, topic, article_ids)
+        topic_article_ids = topic.get("source_article_ids") or default_article_ids
+        await repo.add_topic(conn, report_id, topic, topic_article_ids)
 
     return topics
 

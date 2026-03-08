@@ -219,6 +219,26 @@ async def add_articles(conn: Connection, report_id: int, articles: List[Dict[str
 # Topic Operations
 # ============================================================================
 
+async def get_sector_names(conn: Connection) -> List[str]:
+    """Get all sector names from sectors table.
+
+    Args:
+        conn: Database connection
+
+    Returns:
+        List of sector names
+    """
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT sector_name FROM sectors WHERE sector_name IS NOT NULL AND sector_name != '' ORDER BY sector_name"
+            )
+            rows = await cur.fetchall()
+            return [row[0] for row in rows if row and row[0]]
+    except Exception as e:
+        logger.warning(f"Failed to load sector names from sectors table: {e}")
+        return []
+
 async def get_report_topics(conn: Connection, report_id: int) -> List[Dict[str, Any]]:
     """Get topics for a report.
 

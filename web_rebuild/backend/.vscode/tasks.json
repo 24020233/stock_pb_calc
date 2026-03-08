@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "import sectors page1 backend",
+			"type": "shell",
+			"command": "/Users/linhao/code/AI/stock_pb_calc/.venv/bin/python",
+			"args": [
+				"cron/fetch_sectors.py",
+				"--input-file",
+				"cron/sector_import_page1.jsonp"
+			],
+			"isBackground": false,
+			"group": "build"
+		}
+	]
+}

@@ -1,0 +1,38 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "import sectors page1",
+			"type": "shell",
+			"command": "/Users/linhao/code/AI/stock_pb_calc/.venv/bin/python",
+			"args": [
+				"cron/fetch_sectors.py",
+				"--input-file",
+				"cron/sector_import_page1.jsonp"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "check sectors count",
+			"type": "shell",
+			"command": "/Users/linhao/code/AI/stock_pb_calc/.venv/bin/python",
+			"args": [
+				"-c",
+				"from pathlib import Path; from dotenv import load_dotenv; import os,mysql.connector; load_dotenv(Path('/Users/linhao/code/AI/stock_pb_calc/web_rebuild/.env'), override=True); conn=mysql.connector.connect(host=os.getenv('MYSQL_HOST'), port=int(os.getenv('MYSQL_PORT','3306')), user=os.getenv('MYSQL_USER'), password=os.getenv('MYSQL_PASSWORD'), database=os.getenv('MYSQL_DATABASE'), charset='utf8mb4'); cur=conn.cursor(); cur.execute(\"SHOW TABLES LIKE 'sectors'\"); print(f'table_exists={cur.fetchone() is not None}'); cur.execute('SELECT COUNT(*) FROM sectors'); print(f'count={cur.fetchone()[0]}'); cur.execute('SELECT sector_id, sector_name FROM sectors ORDER BY sector_id LIMIT 5'); [print(row) for row in cur.fetchall()]; cur.close(); conn.close()"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "test eastmoney cookie",
+			"type": "shell",
+			"command": "/Users/linhao/code/AI/stock_pb_calc/.venv/bin/python",
+			"args": [
+				"/Users/linhao/code/AI/stock_pb_calc/tools/test_eastmoney_cookie.py"
+			],
+			"isBackground": false,
+			"group": "build"
+		}
+	]
+}

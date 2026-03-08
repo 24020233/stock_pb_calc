@@ -243,3 +243,16 @@ CREATE TABLE IF NOT EXISTS continuous_rise_data (
 -- Migration: Add progress_info column to reports table (run if column doesn't exist)
 -- ============================================================================
 -- ALTER TABLE reports ADD COLUMN progress_info JSON NULL COMMENT '进度信息' AFTER status;
+
+
+-- 12. sectors（板块信息表）
+CREATE TABLE IF NOT EXISTS sectors (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  sector_id VARCHAR(32) NOT NULL COMMENT '板块ID',
+  sector_name VARCHAR(128) NOT NULL COMMENT '板块名称',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_sector_id (sector_id),
+  KEY idx_sector_name (sector_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='板块信息表';
