@@ -256,3 +256,34 @@ CREATE TABLE IF NOT EXISTS sectors (
   UNIQUE KEY uk_sector_id (sector_id),
   KEY idx_sector_name (sector_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='板块信息表';
+
+
+-- 13. board_stocks（板块成分股数据表）
+CREATE TABLE IF NOT EXISTS board_stocks (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  sector_name VARCHAR(128) NOT NULL COMMENT '板块名称',
+  sector_id VARCHAR(32) NOT NULL COMMENT '板块代码',
+  stock_code VARCHAR(16) NOT NULL COMMENT '股票代码',
+  stock_name VARCHAR(64) NOT NULL COMMENT '股票名称',
+  latest_price DECIMAL(10, 2) NULL COMMENT '最新价(元)',
+  change_pct DECIMAL(10, 4) NULL COMMENT '涨跌幅(%)',
+  change_amount DECIMAL(10, 4) NULL COMMENT '涨跌额(元)',
+  high_price DECIMAL(10, 2) NULL COMMENT '最高价(元)',
+  low_price DECIMAL(10, 2) NULL COMMENT '最低价(元)',
+  open_price DECIMAL(10, 2) NULL COMMENT '今开价(元)',
+  prev_close DECIMAL(10, 2) NULL COMMENT '昨收价(元)',
+  volume DECIMAL(20, 2) NULL COMMENT '成交量(手)',
+  turnover DECIMAL(20, 2) NULL COMMENT '成交额(元)',
+  amplitude DECIMAL(10, 4) NULL COMMENT '振幅(%)',
+  turnover_rate DECIMAL(10, 4) NULL COMMENT '换手率(%)',
+  pe_ratio DECIMAL(10, 4) NULL COMMENT '市盈率-动态',
+  pb_ratio DECIMAL(10, 4) NULL COMMENT '市净率',
+  data_date DATE NOT NULL COMMENT '数据日期',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_sector_date_code (sector_name, data_date, stock_code),
+  KEY idx_sector_name (sector_name),
+  KEY idx_data_date (data_date),
+  KEY idx_stock_code (stock_code),
+  KEY idx_change_pct (change_pct)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='板块成分股数据表';

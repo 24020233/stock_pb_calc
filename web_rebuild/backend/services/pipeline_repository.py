@@ -572,3 +572,107 @@ async def get_active_target_accounts(conn: Connection) -> List[tuple]:
             "SELECT account_name, wx_id FROM target_accounts WHERE status = 'active' ORDER BY sort_order"
         )
         return await cur.fetchall()
+
+
+# ============================================================================
+# Sector Operations
+# ============================================================================
+
+async def get_sector_id_by_name(conn: Connection, sector_name: str) -> Optional[str]:
+    """根据板块名称获取板块代码"""
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT sector_id FROM sectors WHERE sector_name = %s LIMIT 1",
+            (sector_name,),
+        )
+        row = await cur.fetchone()
+        return row[0] if row else None
+
+
+async def get_sectors_by_names(conn: Connection, sector_names: List[str]) -> List[Dict[str, str]]:
+    """根据板块名称列表获取板块信息
+
+    Args:
+        conn: Database connection
+        sector_names: 板块名称列表
+
+    Returns:
+        List of dicts with sector_id and sector_name
+    """
+    if not sector_names:
+        return []
+
+    placeholders = ",".join(["%s"] * len(sector_names))
+    async with conn.cursor() as cur:
+        await cur.execute(
+            f"SELECT sector_id, sector_name FROM sectors WHERE sector_name IN ({placeholders})",
+            sector_names,
+        )
+        rows = await cur.fetchall()
+        return [{"sector_id": row[0], "sector_name": row[1]} for row in rows]
+
+
+async def save_board_stocks(conn: Connection, stocks: List[Dict[str, Any]]) -> int:
+    """保存板块成分股数据（UPSERT）
+
+    Args:
+        conn: Database connection
+        stocks: 股票数据列表
+
+    Returns:
+        保存的记录数
+    """
+    if not stocks:
+        return 0
+
+    count = 0
+    async with conn.cursor() as cur:
+        for stock in stocks:
+            try:
+                await cur.execute("""
+                    INSERT INTO board_stocks
+                    (sector_name, sector_id, stock_code, stock_name, latest_price,
+                     change_pct, change_amount, high_price, low_price, open_price,
+                     prev_close, volume, turnover, amplitude, turnover_rate,
+                     pe_ratio, pb_ratio, data_date)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                    stock_name = VALUES(stock_name),
+                    latest_price = VALUES(latest_price),
+                    change_pct = VALUES(change_pct),
+                    change_amount = VALUES(change_amount),
+                    high_price = VALUES(high_price),
+                    low_price = VALUES(low_price),
+                    open_price = VALUES(open_price),
+                    prev_close = VALUES(prev_close),
+                    volume = VALUES(volume),
+                    turnover = VALUES(turnover),
+                    amplitude = VALUES(amplitude),
+                    turnover_rate = VALUES(turnover_rate),
+                    pe_ratio = VALUES(pe_ratio),
+                    pb_ratio = VALUES(pb_ratio)
+                """, (
+                    stock.get("sector_name"),
+                    stock.get("sector_id"),
+                    stock.get("stock_code"),
+                    stock.get("stock_name"),
+                    stock.get("latest_price"),
+                    stock.get("change_pct"),
+                    stock.get("change_amount"),
+                    stock.get("high_price"),
+                    stock.get("low_price"),
+                    stock.get("open_price"),
+                    stock.get("prev_close"),
+                    stock.get("volume"),
+                    stock.get("turnover"),
+                    stock.get("amplitude"),
+                    stock.get("turnover_rate"),
+                    stock.get("pe_ratio"),
+                    stock.get("pb_ratio"),
+                    stock.get("data_date"),
+                ))
+                count += 1
+            except Exception as e:
+                logger.error(f"Failed to save board stock {stock.get('stock_code')}: {e}")
+
+    return count

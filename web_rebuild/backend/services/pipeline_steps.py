@@ -1,21 +1,17 @@
 # -*- coding: utf-8 -*-
 """Pipeline steps - Individual step execution logic."""
 
-import asyncio
 import logging
 from typing import Any, Dict, List
 
 from aiomysql import Connection
 
 import services.llm_service as llm_service
-import services.stock_service as stock_service
+import services.selenium_service as selenium_service
 from rules.registry import get_rule_class
 from services import pipeline_repository as repo
 
 logger = logging.getLogger(__name__)
-
-# API call delay in seconds to avoid rate limiting
-API_CALL_DELAY = 5
 
 
 # ============================================================================
@@ -74,7 +70,7 @@ async def step2_extract_topics(conn: Connection, report_id: int) -> List[Dict[st
 # ============================================================================
 
 async def step3_get_board_stocks(conn: Connection, report_id: int, top_n: int = 10) -> int:
-    """Step 3: Get stocks from board names in topics.
+    """Step 3: Get stocks from board names in topics using Selenium.
 
     Args:
         conn: Database connection
@@ -101,97 +97,96 @@ async def step3_get_board_stocks(conn: Connection, report_id: int, top_n: int = 
     total_boards = len(all_boards)
     logger.info(f"Step 3: Processing {total_boards} boards for report {report_id}")
 
-    # Track all stocks with their board info for deduplication
-    all_stocks: Dict[str, Dict[str, Any]] = {}  # stock_code -> stock_data
+    if not all_boards:
+        logger.warning("No boards to process")
+        return 0
 
-    # Process each board with delay
-    for idx, board_name in enumerate(all_boards):
-        # Update progress
-        progress_info = {
-            "step": "step3",
-            "current": idx + 1,
-            "total": total_boards,
-            "message": f"正在获取板块 [{board_name}] 数据... ({idx + 1}/{total_boards})"
-        }
-        await repo.update_report_progress(conn, report_id, progress_info)
-
-        try:
-            stocks = stock_service.get_stocks_by_board(board_name)
-
-            if not stocks:
-                logger.warning(f"No stocks found for board: {board_name}")
-                # Add delay even on empty result
-                await asyncio.sleep(API_CALL_DELAY)
-                continue
-
-            # Sort by change_pct descending
-            stocks_sorted = sorted(
-                stocks,
-                key=lambda x: float(x.get("change_pct", 0) or 0),
-                reverse=True
-            )
-
-            # Take top N
-            top_stocks = stocks_sorted[:top_n]
-
-            for stock in top_stocks:
-                stock_code = stock.get("code")
-                if not stock_code:
-                    continue
-
-                # Check if already exists (deduplication)
-                if stock_code in all_stocks:
-                    # Already exists, append board name to related_board
-                    existing = all_stocks[stock_code]
-                    existing_boards = existing.get("_all_boards", [])
-                    if board_name not in existing_boards:
-                        existing_boards.append(board_name)
-                        existing["_all_boards"] = existing_boards
-                    continue
-
-                # Add new stock
-                all_stocks[stock_code] = {
-                    "stock_code": stock_code,
-                    "stock_name": stock.get("name"),
-                    "related_topic_id": None,  # Will be set later if needed
-                    "related_board": board_name,
-                    "latest_price": stock.get("latest_price"),
-                    "change_pct": stock.get("change_pct"),
-                    "change_amount": stock.get("change_amount"),
-                    "volume": stock.get("volume"),
-                    "turnover": stock.get("turnover"),
-                    "amplitude": stock.get("amplitude"),
-                    "high_price": stock.get("high"),
-                    "low_price": stock.get("low"),
-                    "open_price": stock.get("open"),
-                    "prev_close": stock.get("prev_close"),
-                    "turnover_rate": stock.get("turnover_rate"),
-                    "pe_ratio": stock.get("pe_ratio"),
-                    "pb_ratio": stock.get("pb_ratio"),
-                    "snapshot_data": {},
-                    "match_reason": f"来自板块: {board_name}",
-                    "_all_boards": [board_name],
-                }
-
-        except Exception as e:
-            logger.error(f"Failed to get stocks for board {board_name}: {e}")
-
-        # Add delay between API calls to avoid rate limiting
-        if idx < total_boards - 1:  # No delay after last call
-            await asyncio.sleep(API_CALL_DELAY)
-
-    # Clear progress after processing
+    # Update progress - starting
     await repo.update_report_progress(conn, report_id, {
         "step": "step3",
-        "current": total_boards,
+        "current": 0,
         "total": total_boards,
+        "message": "正在启动浏览器获取板块数据..."
+    })
+
+    # Get sector info from database (sector_id and sector_name)
+    sector_list = await repo.get_sectors_by_names(conn, all_boards)
+
+    if not sector_list:
+        logger.warning("No matching sectors found in database")
+        return 0
+
+    logger.info(f"Found {len(sector_list)} matching sectors in database")
+
+    # Update progress
+    await repo.update_report_progress(conn, report_id, {
+        "step": "step3",
+        "current": 0,
+        "total": len(sector_list),
+        "message": f"正在获取 {len(sector_list)} 个板块的成分股数据..."
+    })
+
+    # Fetch all board stocks using selenium (synchronous, runs in thread)
+    # Note: progress updates are not available during selenium execution
+    # because selenium is synchronous and cannot safely call async functions
+    all_results = selenium_service.fetch_all_board_stocks(sector_list, top_n)
+
+    # Save to database and build stock_pool_1
+    all_stocks: Dict[str, Dict[str, Any]] = {}
+    stock_count = 0
+
+    for sector_name, stocks in all_results.items():
+        # Save to board_stocks table
+        await repo.save_board_stocks(conn, stocks)
+
+        # Also save to stock_pool_1 for report
+        for stock in stocks:
+            stock_code = stock.get("stock_code")
+            if not stock_code:
+                continue
+
+            if stock_code in all_stocks:
+                # Deduplication - append board name to existing
+                existing = all_stocks[stock_code]
+                existing_boards = existing.get("_all_boards", [])
+                if sector_name not in existing_boards:
+                    existing_boards.append(sector_name)
+                    existing["_all_boards"] = existing_boards
+                continue
+
+            all_stocks[stock_code] = {
+                "stock_code": stock_code,
+                "stock_name": stock.get("stock_name"),
+                "related_topic_id": None,
+                "related_board": sector_name,
+                "latest_price": stock.get("latest_price"),
+                "change_pct": stock.get("change_pct"),
+                "change_amount": stock.get("change_amount"),
+                "volume": stock.get("volume"),
+                "turnover": stock.get("turnover"),
+                "amplitude": stock.get("amplitude"),
+                "high_price": stock.get("high_price"),
+                "low_price": stock.get("low_price"),
+                "open_price": stock.get("open_price"),
+                "prev_close": stock.get("prev_close"),
+                "turnover_rate": stock.get("turnover_rate"),
+                "pe_ratio": stock.get("pe_ratio"),
+                "pb_ratio": stock.get("pb_ratio"),
+                "snapshot_data": {},
+                "match_reason": f"来自板块: {sector_name}",
+                "_all_boards": [sector_name],
+            }
+
+    # Clear progress
+    await repo.update_report_progress(conn, report_id, {
+        "step": "step3",
+        "current": len(sector_list),
+        "total": len(sector_list),
         "message": "正在保存数据..."
     })
 
-    # Save all stocks to database
-    stock_count = 0
+    # Save to stock_pool_1
     for stock_data in all_stocks.values():
-        # Clean up internal field
         all_boards_list = stock_data.pop("_all_boards", [])
         if len(all_boards_list) > 1:
             stock_data["match_reason"] = f"来自板块: {', '.join(all_boards_list)}"
