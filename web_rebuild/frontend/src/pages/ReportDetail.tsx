@@ -4,6 +4,7 @@ import { Card, Row, Col, Steps, Tabs, Table, Button, message, Spin, Typography, 
 import { PlayCircleOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
 import type { ReportSummary, PipelineNodes, StockPool2 } from '@/types';
 import { reportsApi, pipelineApi, settingsApi } from '@/services/api';
+import type { StrategyRule } from '@/types';
 
 const { Title, Text } = Typography;
 
@@ -21,6 +22,11 @@ export default function ReportDetail() {
   const [pool1Config, setPool1Config] = useState<{ top_n_per_board: number }>({ top_n_per_board: 10 });
   const [configModalVisible, setConfigModalVisible] = useState(false);
   const [configForm] = Form.useForm();
+
+  // Settings state for rules
+  const [availableRules, setAvailableRules] = useState<StrategyRule[]>([]);
+  const [selectedRuleKeys, setSelectedRuleKeys] = useState<string[]>([]);
+  const [isStep4Running, setIsStep4Running] = useState(false);
 
   // Load report data
   const loadReportData = useCallback(async (reportId: number) => {
@@ -66,6 +72,25 @@ export default function ReportDetail() {
       // Ignore config load errors
     }
   };
+
+  // Load rules
+  const loadRules = async () => {
+    try {
+      const res = await settingsApi.listRules();
+      if (res.data.code === 0) {
+        const rules = res.data.data?.rules || [];
+        const enabledRules = rules.filter(r => r.is_enabled);
+        setAvailableRules(enabledRules);
+        setSelectedRuleKeys(enabledRules.map(r => r.rule_key));
+      }
+    } catch (error) {
+      console.error('Failed to load rules', error);
+    }
+  };
+
+  useEffect(() => {
+    loadRules();
+  }, []);
 
   // Save pool1 config
   const handleSaveConfig = async (values: { top_n_per_board: number }) => {
@@ -134,6 +159,29 @@ export default function ReportDetail() {
       message.error(errorMsg);
     } finally {
       setRerunningStep(null);
+    }
+  };
+
+  const handleRunStep4 = async () => {
+    if (!id || selectedRuleKeys.length === 0) {
+      message.warning('请至少选择一个规则');
+      return;
+    }
+    try {
+      setIsStep4Running(true);
+      const res = await pipelineApi.step4Pool2(parseInt(id), { rule_keys: selectedRuleKeys });
+      if (res.data.code === 0) {
+        message.success('异动筛选与深度精选执行完毕！');
+        loadReportData(parseInt(id));
+        setActiveNode('step5');
+      } else {
+        message.error(res.data.msg || '执行失败');
+      }
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.detail || error?.message || '执行失败';
+      message.error(errorMsg);
+    } finally {
+      setIsStep4Running(false);
     }
   };
 
@@ -374,11 +422,41 @@ export default function ReportDetail() {
   };
 
   const renderStep4Content = () => {
-    // 异动筛选 - 功能待实现
+    // 异动筛选 (Node 4) 配置与执行面板
     return (
-      <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>
-        <Text type="secondary">功能开发中，敬请期待...</Text>
-      </div>
+      <Card title="选择要在深度精选应用的规则">
+        <Typography.Paragraph type="secondary">
+          默认勾选系统中已启用的规则。您可以取消勾选不需要的规则。
+        </Typography.Paragraph>
+        <div style={{ marginBottom: 24 }}>
+          {availableRules.map(rule => (
+            <div key={rule.rule_key} style={{ marginBottom: 8 }}>
+              <Button
+                type={selectedRuleKeys.includes(rule.rule_key) ? 'primary' : 'default'}
+                onClick={() => {
+                  if (selectedRuleKeys.includes(rule.rule_key)) {
+                    setSelectedRuleKeys(prev => prev.filter(k => k !== rule.rule_key));
+                  } else {
+                    setSelectedRuleKeys(prev => [...prev, rule.rule_key]);
+                  }
+                }}
+              >
+                {selectedRuleKeys.includes(rule.rule_key) ? <CheckCircleOutlined /> : <div style={{ width: 14, display: 'inline-block' }} />} {rule.rule_name}
+              </Button>
+              <Text type="secondary" style={{ marginLeft: 8 }}>{rule.description || '无描述'}</Text>
+            </div>
+          ))}
+        </div>
+        <Button
+          type="primary"
+          size="large"
+          icon={<PlayCircleOutlined />}
+          loading={isStep4Running}
+          onClick={handleRunStep4}
+        >
+          执行深度精选
+        </Button>
+      </Card>
     );
   };
 
@@ -409,12 +487,50 @@ export default function ReportDetail() {
         render: (score: number) => <Text strong>{score?.toFixed(2) || '-'}</Text>,
       },
     ];
+
+    // Add dynamic columns based on selected rules' result_tags
+    availableRules.forEach(rule => {
+      if (selectedRuleKeys.includes(rule.rule_key) && rule.result_tags && rule.result_tags.length > 0) {
+        rule.result_tags.forEach(tag => {
+          columns.push({
+            title: tag.tag_name,
+            dataIndex: `rule_${rule.rule_key}_${tag.field_name}`, // Internal key for Table
+            key: `rule_${rule.rule_key}_${tag.field_name}`,
+            width: 100,
+            render: (_, record: StockPool2) => {
+              // Find the rule result for this specific rule
+              if (!record.rule_results) return '-';
+
+              // Depending on backend structure, rule_results might be a JSON string or an array of objects
+              let resultsArray = [];
+              if (typeof record.rule_results === 'string') {
+                try {
+                  resultsArray = JSON.parse(record.rule_results);
+                } catch (e) {
+                  return '-';
+                }
+              } else if (Array.isArray(record.rule_results)) {
+                resultsArray = record.rule_results;
+              }
+
+              const specificRuleResult = resultsArray.find((r: any) => r.rule_key === rule.rule_key);
+              if (!specificRuleResult || !specificRuleResult.details) return '-';
+
+              const val = specificRuleResult.details[tag.field_name];
+              return val !== undefined && val !== null ? String(val) : '-';
+            }
+          } as any);
+        });
+      }
+    });
+
     return (
       <Table
         dataSource={data}
-        columns={columns}
+        columns={columns as any}
         rowKey="id"
-        pagination={{ pageSize: 10 }}
+        pagination={{ pageSize: 15 }}
+        scroll={{ x: 'max-content' }}
         locale={{ emptyText: '暂无数据' }}
       />
     );

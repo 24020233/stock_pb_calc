@@ -117,6 +117,7 @@ export default function SettingsPage() {
           description: values.description,
           is_enabled: values.is_enabled,
           sort_order: values.sort_order,
+          result_tags: values.result_tags,
         });
         message.success('更新规则成功');
       } else {
@@ -129,6 +130,7 @@ export default function SettingsPage() {
           description: values.description,
           is_enabled: values.is_enabled ?? true,
           sort_order: values.sort_order ?? 0,
+          result_tags: values.result_tags || [],
         });
         message.success('创建规则成功');
       }
@@ -285,6 +287,7 @@ export default function SettingsPage() {
                 description: record.description,
                 is_enabled: record.is_enabled,
                 sort_order: record.sort_order,
+                result_tags: record.result_tags || [],
                 rule_value_json: JSON.stringify(record.rule_value || {}, null, 2),
                 ...record.rule_value,
               });
@@ -476,6 +479,39 @@ export default function SettingsPage() {
 
           <Form.Item name="sort_order" label="排序">
             <InputNumber style={{ width: '100%' }} />
+          </Form.Item>
+
+          <Form.Item label="规则运行结果标签">
+            <Form.List name="result_tags">
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <Space key={key} style={{ display: 'flex', marginBottom: 8 }} align="baseline">
+                      <Form.Item
+                        {...restField}
+                        name={[name, 'tag_name']}
+                        rules={[{ required: true, message: '标签名称不能为空' }]}
+                      >
+                        <Input placeholder="标签名称 (如: 连涨天数)" />
+                      </Form.Item>
+                      <Form.Item
+                        {...restField}
+                        name={[name, 'field_name']}
+                        rules={[{ required: true, message: '标签字段不能为空' }]}
+                      >
+                        <Input placeholder="标签字段 (如: rise_days)" />
+                      </Form.Item>
+                      <DeleteOutlined onClick={() => remove(name)} style={{ color: 'red' }} />
+                    </Space>
+                  ))}
+                  <Form.Item>
+                    <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                      添加结果标签
+                    </Button>
+                  </Form.Item>
+                </>
+              )}
+            </Form.List>
           </Form.Item>
 
           {/* 旧规则的专用参数字段 */}

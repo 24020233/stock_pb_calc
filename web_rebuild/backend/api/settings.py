@@ -3,7 +3,7 @@
 
 import json
 import logging
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 
 from aiomysql import Connection
 from fastapi import APIRouter, Depends, HTTPException
@@ -52,6 +52,7 @@ class CreateRuleRequest(BaseModel):
     description: Optional[str] = None
     is_enabled: bool = True
     sort_order: int = 0
+    result_tags: Optional[List[Dict[str, str]]] = None
 
 
 class UpdateRuleRequest(BaseModel):
@@ -63,6 +64,7 @@ class UpdateRuleRequest(BaseModel):
     description: Optional[str] = None
     is_enabled: Optional[bool] = None
     sort_order: Optional[int] = None
+    result_tags: Optional[List[Dict[str, str]]] = None
 
 
 @router.get("/accounts", response_model=ApiResponse)
@@ -202,7 +204,7 @@ async def list_rules(
     try:
         async with conn.cursor() as cur:
             await cur.execute(
-                """SELECT id, rule_key, rule_name, rule_handler, rule_value, description, is_enabled, sort_order
+                """SELECT id, rule_key, rule_name, rule_handler, rule_value, description, is_enabled, sort_order, result_tags
                    FROM strategy_config ORDER BY sort_order, id"""
             )
             rows = await cur.fetchall()
@@ -218,6 +220,7 @@ async def list_rules(
                 "description": row[5],
                 "is_enabled": row[6],
                 "sort_order": row[7],
+                "result_tags": row[8] if isinstance(row[8], list) else (json.loads(row[8]) if isinstance(row[8], str) else []),
             })
 
         return ApiResponse(
@@ -240,8 +243,8 @@ async def create_rule(
     try:
         async with conn.cursor() as cur:
             await cur.execute(
-                """INSERT INTO strategy_config (rule_key, rule_name, rule_handler, rule_value, description, is_enabled, sort_order)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                """INSERT INTO strategy_config (rule_key, rule_name, rule_handler, rule_value, description, is_enabled, sort_order, result_tags)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     request.rule_key,
                     request.rule_name,
@@ -250,6 +253,7 @@ async def create_rule(
                     request.description,
                     request.is_enabled,
                     request.sort_order,
+                    json.dumps(request.result_tags or [], ensure_ascii=False),
                 ),
             )
             rule_id = cur.lastrowid
@@ -299,6 +303,10 @@ async def update_rule(
         if request.sort_order is not None:
             updates.append("sort_order = %s")
             params.append(request.sort_order)
+
+        if request.result_tags is not None:
+            updates.append("result_tags = %s")
+            params.append(json.dumps(request.result_tags, ensure_ascii=False))
 
         if updates:
             updates.append("updated_at = NOW()")

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Pipeline steps - Individual step execution logic."""
 
+import asyncio
 import logging
 from typing import Any, Dict, List
 
@@ -9,6 +10,7 @@ from aiomysql import Connection
 import services.llm_service as llm_service
 import services.selenium_service as selenium_service
 from rules.registry import get_rule_class
+from rules.handlers.registry import get_handler
 from services import pipeline_repository as repo
 
 logger = logging.getLogger(__name__)
@@ -213,7 +215,7 @@ async def step4_apply_rules(conn: Connection, report_id: int, rules_config: List
     Args:
         conn: Database connection
         report_id: Report ID
-        rules_config: List of enabled rule configurations
+        rules_config: List of enabled rule configurations (should include rule_handler, rule_value, etc.)
 
     Returns:
         Number of selected stocks in pool 2
@@ -224,103 +226,135 @@ async def step4_apply_rules(conn: Connection, report_id: int, rules_config: List
         logger.warning(f"No stocks in pool 1 for report {report_id}")
         return 0
 
+    stock_codes = [stock["stock_code"] for stock in pool1_stocks]
+    
+    # Store aggregated results per stock.
+    # aggregated_results[stock_code] = {"rule_results": [], "total_score": 0.0, "tech_score": 0.0, "fund_score": 0.0, "all_passed": True}
+    aggregated_results: Dict[str, Dict[str, Any]] = {
+        code: {
+            "rule_results": [],
+            "total_score": 0.0,
+            "tech_score": 0.0,
+            "fund_score": 0.0,
+            "all_passed": True,
+        }
+        for code in stock_codes
+    }
+
+    # Execute rules sequentially
+    is_first_rule = True
+    for rule_config in rules_config:
+        rule_key = rule_config.get("rule_key")
+        rule_handler_key = rule_config.get("rule_handler")
+        rule_params = rule_config.get("rule_value", {})
+
+        # Sequential delay
+        if not is_first_rule:
+            logger.info(f"Waiting 10 seconds before executing next rule: {rule_key}")
+            await asyncio.sleep(10)
+        is_first_rule = False
+        
+        # Determine if we should use the new BaseRuleHandler or legacy BaseRule
+        handler = None
+        if rule_handler_key:
+            handler = get_handler(rule_handler_key)
+
+        if handler:
+            # New handler pattern: execute batch across all stocks
+            logger.info(f"Executing rule handler {rule_handler_key} for rule {rule_key}")
+            result = await handler.execute(stock_codes, rule_params, conn)
+            
+            # Match results back to stocks
+            results_by_code = {item.get("stock_code"): item for item in result.data}
+            for code in stock_codes:
+                stock_result = results_by_code.get(code, {})
+                passed = stock_result.get("is_continuous_rise", False) if rule_handler_key == "continuous_rise" else result.success
+                score = 1.0 if passed else 0.0  # Simple scoring for batch handlers
+                
+                aggregated_results[code]["rule_results"].append({
+                    "rule_key": rule_key,
+                    "passed": passed,
+                    "score": score,
+                    "reason": "Batch handler check",
+                    "details": stock_result,
+                })
+                if not passed:
+                    aggregated_results[code]["all_passed"] = False
+                
+                if rule_key in TECH_RULES:
+                    aggregated_results[code]["tech_score"] += score
+                elif rule_key in FUND_RULES:
+                    aggregated_results[code]["fund_score"] += score
+                aggregated_results[code]["total_score"] += score
+        else:
+            # Legacy rule pattern: process each stock individually
+            logger.info(f"Executing legacy rule {rule_key}")
+            try:
+                rule_class = get_rule_class(rule_key)
+                rule_instance = rule_class(rule_params)
+                
+                for stock in pool1_stocks:
+                    code = stock["stock_code"]
+                    stock_context = {
+                        "stock_code": code,
+                        "stock_name": stock.get("stock_name"),
+                        "snapshot_data": stock.get("snapshot_data", {}),
+                        "related_topic_id": stock.get("related_topic_id"),
+                    }
+                    
+                    try:
+                        res = rule_instance.check(stock_context)
+                        aggregated_results[code]["rule_results"].append({
+                            "rule_key": rule_key,
+                            "passed": res.passed,
+                            "score": res.score,
+                            "reason": res.reason,
+                            "details": res.details,
+                        })
+                        if not res.passed:
+                            aggregated_results[code]["all_passed"] = False
+                        
+                        if rule_key in TECH_RULES:
+                            aggregated_results[code]["tech_score"] += res.score
+                        elif rule_key in FUND_RULES:
+                            aggregated_results[code]["fund_score"] += res.score
+                        aggregated_results[code]["total_score"] += res.score
+                    except Exception as e:
+                        logger.error(f"Error applying rule {rule_key} to {code}: {e}")
+                        aggregated_results[code]["all_passed"] = False
+            except Exception as e:
+                logger.error(f"Error initializing legacy rule {rule_key}: {e}")
+                for code in stock_codes:
+                    aggregated_results[code]["all_passed"] = False
+
+    # Normalize scores and save to pool 2
+    num_tech_rules = sum(1 for r in rules_config if r.get("rule_key") in TECH_RULES)
+    num_fund_rules = sum(1 for r in rules_config if r.get("rule_key") in FUND_RULES)
+    
     selected_count = 0
 
     for stock in pool1_stocks:
-        is_selected, tech_score, fund_score, total_score, rule_results = _apply_rules_to_stock(
-            stock, rules_config
-        )
-
+        code = stock["stock_code"]
+        res = aggregated_results[code]
+        
+        tech_score = res["tech_score"] / num_tech_rules if num_tech_rules > 0 else 0.0
+        fund_score = res["fund_score"] / num_fund_rules if num_fund_rules > 0 else 0.0
+        total_score = res["total_score"]
+        is_selected = res["all_passed"] and total_score > 0
+        
         # Save to pool 2
         await repo.add_pool2_stock(conn, report_id, {
             "pool_1_id": stock["id"],
-            "stock_code": stock.get("stock_code"),
+            "stock_code": code,
             "stock_name": stock.get("stock_name"),
             "tech_score": tech_score,
             "fund_score": fund_score,
             "total_score": total_score,
-            "rule_results": rule_results,
+            "rule_results": res["rule_results"],
             "is_selected": is_selected,
         })
-
+        
         if is_selected:
             selected_count += 1
 
     return selected_count
-
-
-def _apply_rules_to_stock(
-    stock: Dict[str, Any], rules_config: List[Dict[str, Any]]
-) -> tuple[bool, float, float, float, List[Dict[str, Any]]]:
-    """Apply all rules to a single stock.
-
-    Args:
-        stock: Stock dictionary from pool 1
-        rules_config: List of enabled rule configurations
-
-    Returns:
-        Tuple of (is_selected, tech_score, fund_score, total_score, rule_results)
-    """
-    stock_code = stock.get("stock_code")
-    stock_name = stock.get("stock_name")
-    snapshot_data = stock.get("snapshot_data", {})
-
-    # Build stock context for rule checking
-    stock_context = {
-        "stock_code": stock_code,
-        "stock_name": stock_name,
-        "snapshot_data": snapshot_data,
-        "related_topic_id": stock.get("related_topic_id"),
-    }
-
-    # Apply all rules
-    rule_results = []
-    total_score = 0.0
-    tech_score = 0.0
-    fund_score = 0.0
-    all_passed = True
-
-    for rule_config in rules_config:
-        rule_key = rule_config.get("rule_key")
-        rule_params = rule_config.get("rule_value", {})
-
-        try:
-            rule_class = get_rule_class(rule_key)
-            rule_instance = rule_class(rule_params)
-            result = rule_instance.check(stock_context)
-
-            rule_results.append({
-                "rule_key": rule_key,
-                "passed": result.passed,
-                "score": result.score,
-                "reason": result.reason,
-                "details": result.details,
-            })
-
-            if not result.passed:
-                all_passed = False
-
-            # Accumulate scores by type
-            if rule_key in TECH_RULES:
-                tech_score += result.score
-            elif rule_key in FUND_RULES:
-                fund_score += result.score
-
-            total_score += result.score
-
-        except Exception as e:
-            logger.error(f"Error applying rule {rule_key} to {stock_code}: {e}")
-            all_passed = False
-
-    # Normalize scores
-    num_tech_rules = sum(1 for r in rules_config if r.get("rule_key") in TECH_RULES)
-    num_fund_rules = sum(1 for r in rules_config if r.get("rule_key") in FUND_RULES)
-
-    if num_tech_rules > 0:
-        tech_score = tech_score / num_tech_rules
-    if num_fund_rules > 0:
-        fund_score = fund_score / num_fund_rules
-
-    is_selected = all_passed and total_score > 0
-
-    return is_selected, tech_score, fund_score, total_score, rule_results

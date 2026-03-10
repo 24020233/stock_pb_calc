@@ -81,6 +81,7 @@ export interface StrategyRule {
   description?: string;
   is_enabled: boolean;
   sort_order: number;
+  result_tags?: { tag_name: string; field_name: string }[];
 }
 
 export interface PipelineNodes {

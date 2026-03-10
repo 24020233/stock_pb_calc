@@ -91,9 +91,13 @@ async def step3_get_board_stocks(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class Step4Request(BaseModel):
+    rule_keys: Optional[List[str]] = None
+
 @router.post("/{report_id}/step4-pool2", response_model=ApiResponse)
 async def step4_apply_rules(
     report_id: int,
+    request: Optional[Step4Request] = None,
     conn: Connection = Depends(get_db),
 ) -> ApiResponse:
     """Step 4: Apply rules to stock pool 1."""
@@ -101,11 +105,16 @@ async def step4_apply_rules(
         # Get rule configurations
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT rule_key, rule_value, is_enabled FROM strategy_config WHERE is_enabled = TRUE ORDER BY sort_order",
+                "SELECT rule_key, rule_handler, rule_value, is_enabled FROM strategy_config WHERE is_enabled = TRUE ORDER BY sort_order",
             )
             rows = await cur.fetchall()
+            
+            # Filter by rule_keys if provided
+            if request and request.rule_keys is not None:
+                rows = [row for row in rows if row[0] in request.rule_keys]
+                
             rules_config = [
-                {"rule_key": row[0], "rule_value": row[1], "is_enabled": row[2]}
+                {"rule_key": row[0], "rule_handler": row[1], "rule_value": row[2], "is_enabled": row[3]}
                 for row in rows
             ]
 
@@ -202,11 +211,11 @@ async def run_step_task(report_id: int, step_number: int):
                 # Get rule configurations
                 async with conn.cursor() as cur:
                     await cur.execute(
-                        "SELECT rule_key, rule_value, is_enabled FROM strategy_config WHERE is_enabled = TRUE ORDER BY sort_order",
+                        "SELECT rule_key, rule_handler, rule_value, is_enabled FROM strategy_config WHERE is_enabled = TRUE ORDER BY sort_order",
                     )
                     rows = await cur.fetchall()
                     rules_config = [
-                        {"rule_key": row[0], "rule_value": row[1], "is_enabled": row[2]}
+                        {"rule_key": row[0], "rule_handler": row[1], "rule_value": row[2], "is_enabled": row[3]}
                         for row in rows
                     ]
                 count = await pipeline_service.step4_apply_rules(conn, report_id, rules_config)
